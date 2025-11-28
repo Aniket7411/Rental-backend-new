@@ -37,6 +37,11 @@ const {
   getAllServiceRequests,
   updateServiceRequestStatus
 } = require('../controllers/serviceRequestController');
+const {
+  getAllTickets,
+  updateTicketStatus,
+  addTicketRemark
+} = require('../controllers/adminTicketController');
 const { validateAdminLogin, validateAC, validateService } = require('../middleware/validation');
 
 // Admin login (public)
@@ -76,6 +81,11 @@ router.patch('/orders/:orderId', adminAuth, updateOrderStatus);
 // Admin service request routes (from BACKEND_UPDATES.md)
 router.get('/service-requests', adminAuth, getAllServiceRequests);
 router.patch('/service-requests/:requestId', adminAuth, updateServiceRequestStatus);
+
+// Admin ticket routes
+router.get('/tickets', adminAuth, getAllTickets);
+router.patch('/tickets/:ticketId/status', adminAuth, updateTicketStatus);
+router.post('/tickets/:ticketId/remarks', adminAuth, addTicketRemark);
 
 module.exports = router;
 

@@ -24,6 +24,7 @@ const wishlistRoutes = require('./routes/wishlist');
 const orderRoutes = require('./routes/orders');
 const paymentRoutes = require('./routes/payments');
 const serviceRequestRoutes = require('./routes/serviceRequests');
+const ticketRoutes = require('./routes/tickets');
 
 // Import error handler
 const errorHandler = require('./middleware/errorHandler');
@@ -88,6 +89,7 @@ app.use('/api/users/wishlist', wishlistRoutes);
 app.use('/api/users/orders', orderRoutes);
 app.use('/api/payments', paymentRoutes);
 app.use('/api/users/service-requests', serviceRequestRoutes);
+app.use('/api/tickets', ticketRoutes);
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {
