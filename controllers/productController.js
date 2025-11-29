@@ -43,7 +43,7 @@ exports.getProducts = async (req, res, next) => {
     if (minPrice || maxPrice) {
       const priceQuery = {};
       if (duration) {
-        const priceField = duration === 'monthly' ? 'price.monthly' : `price.${duration}`;
+        const priceField = `price.${duration}`;
         if (minPrice) priceQuery[priceField] = { $gte: Number(minPrice) };
         if (maxPrice) {
           if (priceQuery[priceField]) {
@@ -53,8 +53,8 @@ exports.getProducts = async (req, res, next) => {
           }
         }
       } else {
-        // Check all price fields
-        const priceFields = ['price.3', 'price.6', 'price.9', 'price.11', 'price.monthly'];
+        // Check all price fields (3, 6, 9, 11 months only)
+        const priceFields = ['price.3', 'price.6', 'price.9', 'price.11'];
         query.$or = priceFields.map(field => {
           const fieldQuery = {};
           if (minPrice) fieldQuery[field] = { $gte: Number(minPrice) };
@@ -155,10 +155,10 @@ exports.createProduct = async (req, res, next) => {
       });
     }
 
-    if (!price || (!price.monthly && !price['3'] && !price['6'] && !price['9'] && !price['11'])) {
+    if (!price || !price['3'] || !price['6'] || !price['9'] || !price['11']) {
       return res.status(400).json({
         success: false,
-        message: 'Please provide at least one price',
+        message: 'All rental duration prices (3, 6, 9, 11 months) are required',
         error: 'VALIDATION_ERROR'
       });
     }

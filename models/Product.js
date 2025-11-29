@@ -60,10 +60,6 @@ const productSchema = new mongoose.Schema({
     11: {
       type: Number,
       required: [true, '11 months price is required']
-    },
-    monthly: {
-      type: Number,
-      required: [true, 'Monthly price is required']
     }
   },
   discount: {
@@ -76,7 +72,7 @@ const productSchema = new mongoose.Schema({
     type: [String],
     required: [true, 'At least one image is required'],
     validate: {
-      validator: function(v) {
+      validator: function (v) {
         return v && v.length > 0;
       },
       message: 'At least one image is required'
@@ -156,7 +152,7 @@ const productSchema = new mongoose.Schema({
 productSchema.index({ name: 'text', brand: 'text', model: 'text', location: 'text' });
 
 // Calculate average rating before saving
-productSchema.pre('save', function(next) {
+productSchema.pre('save', function (next) {
   if (this.reviews && this.reviews.length > 0) {
     const sum = this.reviews.reduce((acc, review) => acc + review.rating, 0);
     this.averageRating = sum / this.reviews.length;

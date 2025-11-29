@@ -46,14 +46,13 @@ exports.getAllACs = async (req, res, next) => {
       query.location = { $regex: location, $options: 'i' };
     }
 
-    // Price filters based on duration (3, 6, 9, 11, or monthly)
+    // Price filters based on duration (3, 6, 9, or 11 months)
     if (duration) {
       const durationMap = {
         '3': '3',
         '6': '6',
         '9': '9',
-        '11': '11',
-        'monthly': 'monthly'
+        '11': '11'
       };
       // Duration is used for filtering, not querying price directly here
     }

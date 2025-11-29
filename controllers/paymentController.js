@@ -151,6 +151,115 @@ exports.verifyPayment = async (req, res, next) => {
   }
 };
 
+// Process Payment (Pay Now)
+exports.processPayment = async (req, res, next) => {
+  try {
+    const { orderId, amount, paymentMethod, paymentDetails } = req.body;
+    const userId = req.user._id || req.user.id;
+
+    if (!orderId || !amount) {
+      return res.status(400).json({
+        success: false,
+        message: 'Order ID and amount are required',
+        error: 'VALIDATION_ERROR'
+      });
+    }
+
+    // Verify order
+    const order = await Order.findOne({ _id: orderId, userId });
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        message: 'Order not found',
+        error: 'NOT_FOUND'
+      });
+    }
+
+    // Verify amount matches order final total
+    if (Math.abs(amount - order.finalTotal) > 0.01) {
+      return res.status(400).json({
+        success: false,
+        message: `Payment amount (${amount}) does not match order total (${order.finalTotal})`,
+        error: 'VALIDATION_ERROR'
+      });
+    }
+
+    // Create payment record
+    const payment = await Payment.create({
+      orderId: order._id,
+      userId,
+      amount,
+      paymentMethod: paymentMethod || 'razorpay',
+      paymentGateway: paymentMethod || 'razorpay',
+      gatewayOrderId: paymentDetails?.razorpay_order_id || paymentDetails?.order_id,
+      transactionId: paymentDetails?.razorpay_payment_id || paymentDetails?.payment_id,
+      signature: paymentDetails?.razorpay_signature || paymentDetails?.signature,
+      status: 'Completed',
+      paidAt: new Date()
+    });
+
+    // Update order payment status
+    order.paymentStatus = 'paid';
+    order.paymentDetails = {
+      paymentId: payment.paymentId,
+      transactionId: payment.transactionId,
+      gateway: payment.paymentGateway,
+      paidAt: payment.paidAt
+    };
+    await order.save();
+
+    res.status(201).json({
+      success: true,
+      message: 'Payment processed successfully',
+      data: {
+        paymentId: payment.paymentId,
+        orderId: order.orderId,
+        amount: payment.amount,
+        status: payment.status,
+        transactionId: payment.transactionId,
+        createdAt: payment.createdAt
+      }
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// Get Payment Status
+exports.getPaymentStatus = async (req, res, next) => {
+  try {
+    const userId = req.user._id || req.user.id;
+    const paymentId = req.params.paymentId;
+
+    const payment = await Payment.findOne({ paymentId, userId })
+      .populate('orderId', 'orderId status');
+
+    if (!payment) {
+      return res.status(404).json({
+        success: false,
+        message: 'Payment not found',
+        error: 'NOT_FOUND'
+      });
+    }
+
+    res.json({
+      success: true,
+      data: {
+        _id: payment._id,
+        paymentId: payment.paymentId,
+        orderId: payment.orderId,
+        amount: payment.amount,
+        status: payment.status,
+        paymentMethod: payment.paymentGateway,
+        transactionId: payment.transactionId,
+        createdAt: payment.createdAt
+      }
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 // Calculate Payment Options
 exports.calculatePayment = async (req, res, next) => {
   try {
@@ -176,29 +285,23 @@ exports.calculatePayment = async (req, res, next) => {
 
     // Calculate discount
     let discountAmount = 0;
-    let finalAmount = order.totalAmount;
+    let finalAmount = order.total;
 
-    // Apply discount if any (you can add discount logic here)
-    // For example, if order has a discount code or user has a discount
-    // discountAmount = order.totalAmount * (discountPercentage / 100);
-    // finalAmount = order.totalAmount - discountAmount;
-
-    // Calculate advance amount (typically 10% of total)
-    const advanceAmount = paymentMethod === 'advance' 
-      ? Math.ceil(finalAmount * 0.1) 
-      : finalAmount;
-
-    const remainingAmount = finalAmount - advanceAmount;
+    // Apply discount if payNow (5%)
+    if (paymentMethod === 'payNow') {
+      discountAmount = order.total * 0.05;
+      finalAmount = order.total - discountAmount;
+    }
 
     res.json({
       success: true,
       data: {
-        totalAmount: order.totalAmount,
-        discount: 0, // Add discount calculation if needed
+        totalAmount: order.total,
+        discount: discountAmount,
         discountAmount,
         finalAmount,
-        advanceAmount,
-        remainingAmount
+        advanceAmount: finalAmount,
+        remainingAmount: 0
       }
     });
   } catch (error) {

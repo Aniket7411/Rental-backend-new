@@ -14,18 +14,21 @@ const orderSchema = new mongoose.Schema({
     index: true
   },
   items: [{
-    productId: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'Product',
+    type: {
+      type: String,
+      enum: ['rental', 'service'],
       required: true
     },
-    productSnapshot: {
-      type: Object,
-      required: true
+    // For rental items
+    productId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Product'
+    },
+    product: {
+      type: Object // Product snapshot
     },
     quantity: {
       type: Number,
-      required: true,
       min: 1
     },
     price: {
@@ -33,53 +36,65 @@ const orderSchema = new mongoose.Schema({
       required: true,
       min: 0
     },
-    tenure: {
-      type: String,
-      enum: ['3', '6', '9', '11', 'monthly'],
-      required: true
+    duration: {
+      type: Number,
+      enum: [3, 6, 9, 11]
+      // Duration is required for rental items (validated in controller)
     },
-    rentalStartDate: {
-      type: Date,
-      required: true
+    // For service items
+    serviceId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Service'
     },
-    rentalEndDate: {
-      type: Date,
-      required: true
+    service: {
+      type: Object // Service snapshot
+    },
+    bookingDetails: {
+      date: String,
+      time: String,
+      address: String,
+      addressType: String,
+      contactName: String,
+      contactPhone: String
     }
   }],
-  totalAmount: {
+  total: {
     type: Number,
     required: [true, 'Total amount is required'],
     min: 0
   },
-  paymentMethod: {
-    type: String,
-    enum: ['full', 'advance'],
-    required: true
-  },
-  paymentStatus: {
-    type: String,
-    enum: ['Pending', 'Partial', 'Completed'],
-    default: 'Pending'
-  },
-  paidAmount: {
+  discount: {
     type: Number,
     default: 0,
     min: 0
   },
-  remainingAmount: {
+  finalTotal: {
     type: Number,
+    required: [true, 'Final total is required'],
     min: 0
+  },
+  paymentOption: {
+    type: String,
+    enum: ['payNow', 'payLater'],
+    required: true
+  },
+  paymentStatus: {
+    type: String,
+    enum: ['paid', 'pending'],
+    default: 'pending'
   },
   status: {
     type: String,
-    enum: ['Pending', 'Processing', 'Completed', 'Cancelled'],
-    default: 'Pending',
+    enum: ['pending', 'confirmed', 'processing', 'shipped', 'delivered', 'completed', 'cancelled'],
+    default: 'pending',
     index: true
   },
   shippingAddress: {
     type: String,
-    required: [true, 'Shipping address is required'],
+    trim: true
+  },
+  billingAddress: {
+    type: String,
     trim: true
   },
   paymentDetails: {
@@ -93,7 +108,7 @@ const orderSchema = new mongoose.Schema({
 });
 
 // Generate order ID before saving
-orderSchema.pre('save', async function(next) {
+orderSchema.pre('save', async function (next) {
   if (!this.orderId) {
     const year = new Date().getFullYear();
     const count = await mongoose.model('Order').countDocuments({});

@@ -1,267 +1,19 @@
 # Backend API Documentation - Rental Service Platform
 
-## Table of Contents
-1. [Base Configuration](#base-configuration)
-2. [Authentication & Authorization](#authentication--authorization)
-3. [Data Models & Schemas](#data-models--schemas)
-4. [API Endpoints](#api-endpoints)
-5. [Error Handling](#error-handling)
-6. [Integration Notes](#integration-notes)
+## Base URL
+```
+http://localhost:5000/api
+```
+For production, update the base URL in the frontend `src/services/api.js`
 
 ---
 
-## Base Configuration
+## Authentication
 
-### API Base URL
-```
-Development: http://localhost:5000/api
-Production: https://your-production-domain.com/api
-```
+All authenticated endpoints require `Authorization: Bearer <token>` header.
 
-### Request Headers
-All authenticated requests must include:
-```
-Authorization: Bearer <jwt_token>
-Content-Type: application/json
-```
-
----
-
-## Authentication & Authorization
-
-### User Roles
-- `user`: Regular customer
-- `admin`: Administrator with full access
-
-### JWT Token
-- **Expiration**: 7 days
-- **Payload**: `{ userId, email, role }`
-- **Storage**: Frontend stores in `localStorage` as `token`
-
----
-
-## Data Models & Schemas
-
-### 1. User Model
-
-```javascript
-{
-  _id: ObjectId,
-  name: String (required),
-  email: String (required, unique, indexed),
-  password: String (hashed, required),
-  phone: String (required, min 10 digits),
-  homeAddress: String (optional),
-  interestedIn: [String] (optional), // ["AC", "Refrigerator", "Washing Machine"]
-  role: String (enum: ["user", "admin"], default: "user", indexed),
-  createdAt: Date,
-  updatedAt: Date
-}
-```
-
-### 2. Product Model
-
-```javascript
-{
-  _id: ObjectId,
-  category: String (enum: ["AC", "Refrigerator", "Washing Machine"], required),
-  name: String (required),
-  brand: String (required),
-  model: String (optional, default: ""),
-  capacity: String (required), // "1 Ton", "190 L", "5.8 kg"
-  type: String (required), // "Split", "Single Door", "Top Load"
-  condition: String (enum: ["New", "Refurbished"], default: "New"),
-  description: String (optional, default: ""),
-  location: String (required),
-  status: String (enum: ["Available", "Rented Out", "Under Maintenance"], default: "Available"),
-  discount: Number (min: 0, max: 100, default: 0),
-  price: {
-    3: Number (required), // 3 months price
-    6: Number (required), // 6 months price
-    9: Number (required), // 9 months price
-    11: Number (required), // 11 months price
-    monthly: Number (required) // Monthly price
-  },
-  images: [String] (required, min: 1), // Cloudinary URLs, first image is hero image
-  features: {
-    specs: [String] (optional),
-    dimensions: String (optional),
-    safety: [String] (optional)
-  },
-  // Category-specific fields
-  energyRating: String (optional), // Only for Refrigerator: "2 Star", "3 Star", "4 Star", "5 Star"
-  operationType: String (optional), // Only for Washing Machine: "Automatic", "Semi-Automatic"
-  loadType: String (optional), // Only for Washing Machine: "Top Load", "Front Load"
-  createdAt: Date,
-  updatedAt: Date
-}
-```
-
-### 3. Service Model
-
-```javascript
-{
-  _id: ObjectId,
-  title: String (required),
-  description: String (required),
-  price: Number (required),
-  originalPrice: Number (optional),
-  badge: String (optional), // "Visit Within 1 Hour", "Most Booked", "Power Saver"
-  image: String (required), // Cloudinary URL
-  process: [String] (optional), // Array of process steps
-  benefits: [String] (optional), // Array of benefits
-  keyFeatures: [String] (optional), // Array of key features
-  recommendedFrequency: String (optional),
-  createdAt: Date,
-  updatedAt: Date
-}
-```
-
-### 4. Service Booking Model
-
-```javascript
-{
-  _id: ObjectId,
-  serviceId: ObjectId (ref: "Service", required),
-  userId: ObjectId (ref: "User", optional), // Optional for guest bookings
-  name: String (required),
-  phone: String (required),
-  email: String (optional),
-  address: String (required),
-  preferredDate: String (optional),
-  preferredTime: String (optional),
-  description: String (optional),
-  images: [String] (optional), // Cloudinary URLs for issue images
-  status: String (enum: ["New", "Contacted", "In-Progress", "Resolved", "Rejected"], default: "New"),
-  createdAt: Date,
-  updatedAt: Date
-}
-```
-
-### 5. Rental Inquiry Model
-
-```javascript
-{
-  _id: ObjectId,
-  productId: ObjectId (ref: "Product", required), // Preferred field
-  acId: ObjectId (ref: "Product", optional), // Backward compatibility
-  productCategory: String (enum: ["AC", "Refrigerator", "Washing Machine"], default: "AC"),
-  name: String (required),
-  phone: String (required),
-  email: String (required),
-  message: String (optional),
-  acDetails: { // Product details snapshot
-    id: ObjectId,
-    brand: String,
-    model: String,
-    capacity: String,
-    type: String,
-    location: String,
-    price: Object
-  },
-  status: String (enum: ["Pending", "Contacted", "Completed", "Cancelled"], default: "Pending"),
-  createdAt: Date,
-  updatedAt: Date
-}
-```
-
-### 6. Lead Model (General Lead Capture)
-
-```javascript
-{
-  _id: ObjectId,
-  name: String (required),
-  phone: String (required),
-  email: String (optional),
-  source: String (optional), // "browse", "home", "contact"
-  message: String (optional),
-  createdAt: Date
-}
-```
-
-### 7. Vendor Request Model
-
-```javascript
-{
-  _id: ObjectId,
-  name: String (required),
-  phone: String (required),
-  email: String (required),
-  message: String (optional),
-  createdAt: Date
-}
-```
-
-### 8. Contact Form Model
-
-```javascript
-{
-  _id: ObjectId,
-  name: String (required),
-  email: String (required),
-  phone: String (required),
-  subject: String (optional),
-  message: String (required),
-  createdAt: Date
-}
-```
-
----
-
-## API Endpoints
-
-### Authentication Endpoints
-
-#### 1. Unified Login
-```
-POST /api/auth/login
-```
-**Description**: Single login endpoint that auto-detects admin or user role.
-
-**Request Body:**
-```json
-{
-  "email": "user@example.com",
-  "password": "password123"
-}
-```
-
-**Response (Success):**
-```json
-{
-  "success": true,
-  "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
-  "user": {
-    "id": "user_id",
-    "name": "User Name",
-    "email": "user@example.com",
-    "role": "user",
-    "phone": "1234567890",
-    "homeAddress": "",
-    "interestedIn": []
-  }
-}
-```
-
-**Response (Error):**
-```json
-{
-  "success": false,
-  "message": "Invalid email or password"
-}
-```
-
-**Status Codes:**
-- `200`: Success
-- `401`: Invalid credentials
-- `500`: Server error
-
----
-
-#### 2. User Signup
-```
-POST /api/auth/signup
-```
+### 1. User Signup
+**POST** `/auth/signup`
 
 **Request Body:**
 ```json
@@ -269,49 +21,73 @@ POST /api/auth/signup
   "name": "John Doe",
   "email": "john@example.com",
   "password": "password123",
-  "phone": "1234567890",
-  "homeAddress": "123 Main St, City" (optional),
-  "interestedIn": ["AC", "Refrigerator"] (optional)
+  "phone": "+919999999999"
 }
 ```
 
-**Response (Success):**
+**Response (200):**
 ```json
 {
   "success": true,
   "message": "Account created successfully",
-  "token": "jwt_token_here",
+  "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
   "user": {
     "id": "user_id",
     "name": "John Doe",
     "email": "john@example.com",
-    "role": "user",
-    "phone": "1234567890",
-    "homeAddress": "123 Main St, City",
-    "interestedIn": ["AC", "Refrigerator"]
+    "phone": "+919999999999",
+    "role": "user"
   }
 }
 ```
 
-**Response (Error):**
+**Error Response (400/409):**
 ```json
 {
   "success": false,
-  "message": "User already exists with this email"
+  "message": "Email already exists"
 }
 ```
 
-**Status Codes:**
-- `201`: Created
-- `400`: Validation error or user exists
-- `500`: Server error
+---
+
+### 2. Login (Unified - Auto-detects Admin/User)
+**POST** `/auth/login`
+
+**Request Body:**
+```json
+{
+  "email": "admin@example.com",
+  "password": "password123"
+}
+```
+
+**Response (200):**
+```json
+{
+  "success": true,
+  "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "user": {
+    "id": "user_id",
+    "name": "Admin User",
+    "email": "admin@example.com",
+    "role": "admin" // or "user"
+  }
+}
+```
+
+**Error Response (401):**
+```json
+{
+  "success": false,
+  "message": "Invalid credentials"
+}
+```
 
 ---
 
-#### 3. Forgot Password
-```
-POST /api/auth/forgot-password
-```
+### 3. Forgot Password
+**POST** `/auth/forgot-password`
 
 **Request Body:**
 ```json
@@ -320,7 +96,7 @@ POST /api/auth/forgot-password
 }
 ```
 
-**Response:**
+**Response (200):**
 ```json
 {
   "success": true,
@@ -328,231 +104,197 @@ POST /api/auth/forgot-password
 }
 ```
 
-**Status Codes:**
-- `200`: Success
-- `404`: Email not found
-- `500`: Server error
-
 ---
 
-### Public Product Endpoints
+## Products (Public Endpoints)
 
-#### 4. Get Products (Browse)
-```
-GET /api/acs
-```
+### 4. Get All Products (with filters)
+**GET** `/acs`
 
 **Query Parameters:**
-- `category` (optional): "AC" | "Refrigerator" | "Washing Machine"
-- `search` (optional): Search term for brand, model, location
+- `category` (optional): `"AC"`, `"Refrigerator"`, `"Washing Machine"`, or comma-separated list
+- `brand` (optional): Filter by brand
 - `capacity` (optional): Filter by capacity
-- `type` (optional): Filter by type
+- `type` (optional): Filter by type (e.g., "Split", "Window")
 - `location` (optional): Filter by location
-- `duration` (optional): "3" | "6" | "9" | "11" | "monthly"
+- `minPrice` (optional): Minimum price
+- `maxPrice` (optional): Maximum price
+- `status` (optional): `"Available"`, `"Rented Out"`
+- `page` (optional): Page number for pagination
+- `limit` (optional): Items per page
 
-**Response:**
+**Example:**
+```
+GET /acs?category=AC,Refrigerator&status=Available&minPrice=1000&maxPrice=5000
+```
+
+**Response (200):**
 ```json
 {
   "success": true,
   "data": [
     {
       "_id": "product_id",
-      "category": "AC",
-      "name": "1 Ton 3 Star Convertible Inverter Split AC",
       "brand": "LG",
-      "model": "LG123ABC",
-      "capacity": "1 Ton",
+      "model": "1.5 Ton Split AC",
+      "capacity": "1.5 Ton",
       "type": "Split",
-      "condition": "New",
-      "description": "Product description",
-      "location": "Mumbai, Maharashtra",
+      "category": "AC",
+      "description": "Energy efficient split AC",
+      "location": "Mumbai",
       "status": "Available",
-      "discount": 5,
       "price": {
-        "3": 15000,
-        "6": 28000,
-        "9": 40000,
-        "11": 50000,
-        "monthly": 5000
+        "monthly": 2000,
+        "quarterly": 5500,
+        "yearly": 20000
       },
-      "images": ["https://cloudinary.com/image1.jpg", "https://cloudinary.com/image2.jpg"],
+      "images": [
+        "https://example.com/image1.jpg",
+        "https://example.com/image2.jpg"
+      ],
       "features": {
-        "specs": ["Capacity/Size: 1T"],
-        "dimensions": "950\"L x 290\"B x 375\"H",
-        "safety": ["Period Maintenance"]
+        "energyRating": "5 Star",
+        "operationType": "Inverter",
+        "loadType": "Full Load"
       },
-      "energyRating": "",
-      "operationType": "",
-      "loadType": ""
+      "condition": "New",
+      "createdAt": "2024-01-15T10:00:00Z",
+      "updatedAt": "2024-01-15T10:00:00Z"
     }
   ],
   "total": 50
 }
 ```
 
-**Status Codes:**
-- `200`: Success
-- `500`: Server error
-
 ---
 
-#### 5. Get Product by ID
-```
-GET /api/acs/:id
-```
+### 5. Get Product by ID
+**GET** `/acs/:id`
 
-**Response:**
+**Response (200):**
 ```json
 {
   "success": true,
   "data": {
     "_id": "product_id",
-    "category": "AC",
-    "name": "1 Ton 3 Star Convertible Inverter Split AC",
     "brand": "LG",
-    "model": "LG123ABC",
-    "capacity": "1 Ton",
+    "model": "1.5 Ton Split AC",
+    "capacity": "1.5 Ton",
     "type": "Split",
-    "condition": "New",
-    "description": "Product description",
-    "location": "Mumbai, Maharashtra",
+    "category": "AC",
+    "description": "Energy efficient split AC",
+    "location": "Mumbai",
     "status": "Available",
-    "discount": 5,
     "price": {
-      "3": 15000,
-      "6": 28000,
-      "9": 40000,
-      "11": 50000,
-      "monthly": 5000
+      "monthly": 2000,
+      "quarterly": 5500,
+      "yearly": 20000
     },
-    "images": ["https://cloudinary.com/image1.jpg"],
-    "features": {
-      "specs": ["Capacity/Size: 1T"],
-      "dimensions": "950\"L x 290\"B x 375\"H",
-      "safety": ["Period Maintenance"]
-    },
-    "createdAt": "2024-01-01T00:00:00.000Z",
-    "updatedAt": "2024-01-01T00:00:00.000Z"
+    "images": ["https://example.com/image1.jpg"],
+    "features": {},
+    "condition": "New",
+    "createdAt": "2024-01-15T10:00:00Z"
   }
 }
 ```
 
-**Status Codes:**
-- `200`: Success
-- `404`: Product not found
-- `500`: Server error
+**Error Response (404):**
+```json
+{
+  "success": false,
+  "message": "Product not found"
+}
+```
 
 ---
 
-#### 6. Create Rental Inquiry
-```
-POST /api/acs/:id/inquiry
-```
+### 6. Create Rental Inquiry
+**POST** `/acs/:id/inquiry`
 
 **Request Body:**
 ```json
 {
-  "name": "John Doe",
-  "phone": "1234567890",
-  "email": "john@example.com",
-  "message": "I'm interested in this product",
   "acId": "product_id",
-  "acDetails": {
-    "id": "product_id",
-    "brand": "LG",
-    "model": "LG123ABC",
-    "capacity": "1 Ton",
-    "type": "Split",
-    "location": "Mumbai, Maharashtra",
-    "price": {
-      "monthly": 5000
-    }
-  }
+  "name": "John Doe",
+  "email": "john@example.com",
+  "phone": "+919999999999",
+  "duration": "Monthly",
+  "message": "Interested in renting this AC"
 }
 ```
 
-**Response:**
+**Response (200):**
 ```json
 {
   "success": true,
   "message": "Rental inquiry submitted successfully",
   "data": {
     "_id": "inquiry_id",
-    "productId": "product_id",
-    "productCategory": "AC",
+    "acId": "product_id",
     "name": "John Doe",
-    "phone": "1234567890",
     "email": "john@example.com",
-    "message": "I'm interested in this product",
+    "phone": "+919999999999",
+    "duration": "Monthly",
+    "message": "Interested in renting this AC",
     "status": "Pending",
-    "createdAt": "2024-01-01T00:00:00.000Z"
+    "createdAt": "2024-01-15T10:00:00Z"
   }
 }
 ```
 
-**Status Codes:**
-- `201`: Created
-- `400`: Validation error
-- `500`: Server error
-
 ---
 
-### Service Endpoints
+## Services (Public Endpoints)
 
-#### 7. Get All Services
-```
-GET /api/services
-```
+### 7. Get All Services
+**GET** `/services`
 
-**Response:**
+**Response (200):**
 ```json
 {
   "success": true,
   "data": [
     {
       "_id": "service_id",
-      "title": "AC Repair Service",
-      "description": "Professional AC repair",
-      "price": 500,
-      "originalPrice": 700,
-      "badge": "Visit Within 1 Hour",
-      "image": "https://cloudinary.com/service.jpg",
-      "process": ["Step 1", "Step 2"],
-      "benefits": ["Benefit 1", "Benefit 2"],
-      "keyFeatures": ["Feature 1", "Feature 2"],
-      "recommendedFrequency": "Every 3 months"
+      "title": "AC Deep Cleaning",
+      "description": "Complete deep cleaning service",
+      "price": 999,
+      "image": "https://example.com/service.jpg",
+      "createdAt": "2024-01-15T10:00:00Z"
     }
   ]
 }
 ```
 
-**Status Codes:**
-- `200`: Success
-- `500`: Server error
-
 ---
 
-#### 8. Create Service Booking
-```
-POST /api/service-bookings
-```
+### 8. Create Service Booking
+**POST** `/service-bookings`
 
 **Request Body:**
 ```json
 {
   "serviceId": "service_id",
+  "serviceTitle": "AC Deep Cleaning",
+  "servicePrice": 999,
   "name": "John Doe",
-  "phone": "1234567890",
-  "email": "john@example.com",
-  "address": "123 Main St, City",
-  "preferredDate": "2024-01-15",
-  "preferredTime": "10:00 AM",
-  "description": "AC not cooling properly",
-  "images": ["https://cloudinary.com/issue1.jpg"]
+  "phone": "+919999999999",
+  "date": "2024-02-01",
+  "time": "10-12",
+  "address": "123 Main Street, Mumbai",
+  "addressType": "myself",
+  "contactName": "John Doe",
+  "contactPhone": "+919999999999",
+  "paymentOption": "payLater"
 }
 ```
 
-**Response:**
+**Note:** 
+- `paymentOption` can be `"payNow"` or `"payLater"`
+- If `paymentOption` is `"payNow"`, payment should be processed and `paymentStatus` should be set to `"paid"`
+- If `paymentOption` is `"payLater"`, `paymentStatus` should be `"pending"`
+
+**Response (200):**
 ```json
 {
   "success": true,
@@ -560,269 +302,401 @@ POST /api/service-bookings
   "data": {
     "_id": "booking_id",
     "serviceId": "service_id",
+    "serviceTitle": "AC Deep Cleaning",
+    "servicePrice": 999,
+    "userId": "user_id",
     "name": "John Doe",
-    "phone": "1234567890",
+    "phone": "+919999999999",
+    "date": "2024-02-01",
+    "time": "10-12",
+    "address": "123 Main Street, Mumbai",
+    "addressType": "myself",
+    "contactName": "John Doe",
+    "contactPhone": "+919999999999",
+    "paymentOption": "payLater",
+    "paymentStatus": "pending",
     "status": "New",
-    "createdAt": "2024-01-01T00:00:00.000Z"
+    "createdAt": "2024-01-15T10:00:00Z"
   }
 }
 ```
 
-**Status Codes:**
-- `201`: Created
-- `400`: Validation error
-- `500`: Server error
-
 ---
 
-### Lead & Contact Endpoints
+## Orders (Authenticated - User)
 
-#### 9. Create Lead
+### 9. Create Order
+**POST** `/orders`
+
+**Headers:**
 ```
-POST /api/leads
+Authorization: Bearer <token>
 ```
 
 **Request Body:**
 ```json
 {
-  "name": "John Doe",
-  "phone": "1234567890",
-  "email": "john@example.com",
-  "source": "browse",
-  "message": "Interested in AC rental"
+  "items": [
+    {
+      "type": "rental",
+      "productId": "product_id",
+      "quantity": 1,
+      "price": 2000
+    },
+    {
+      "type": "service",
+      "serviceId": "service_id",
+      "quantity": 1,
+      "price": 999,
+      "bookingDetails": {
+        "date": "2024-02-01",
+        "time": "10-12",
+        "address": "123 Main Street, Mumbai",
+        "addressType": "myself",
+        "contactName": "John Doe",
+        "contactPhone": "+919999999999",
+        "paymentOption": "payLater"
+      }
+    }
+  ],
+  "total": 2999,
+  "discount": 0,
+  "finalTotal": 2999,
+  "paymentOption": "payLater",
+  "paymentStatus": "pending"
 }
 ```
 
-**Response:**
+**Note:**
+- `paymentOption` can be `"payNow"` or `"payLater"`
+- If `paymentOption` is `"payNow"`:
+  - Process payment (integrate with payment gateway)
+  - Set `paymentStatus` to `"paid"`
+  - Set order `status` to `"confirmed"`
+  - Notify admin about the order
+- If `paymentOption` is `"payLater"`:
+  - Set `paymentStatus` to `"pending"`
+  - Set order `status` to `"pending"`
+  - Notify admin about the pending order
+
+**Response (200):**
 ```json
 {
   "success": true,
-  "message": "Thank you! We will contact you soon.",
+  "message": "Order created successfully",
   "data": {
-    "_id": "lead_id",
-    "name": "John Doe",
-    "phone": "1234567890",
-    "createdAt": "2024-01-01T00:00:00.000Z"
+    "_id": "order_id",
+    "orderId": "ORD-2024-001",
+    "userId": "user_id",
+    "items": [
+      {
+        "type": "rental",
+        "productId": "product_id",
+        "product": {
+          "_id": "product_id",
+          "brand": "LG",
+          "model": "1.5 Ton Split AC",
+          "images": ["https://example.com/image1.jpg"]
+        },
+        "quantity": 1,
+        "price": 2000
+      },
+      {
+        "type": "service",
+        "serviceId": "service_id",
+        "service": {
+          "_id": "service_id",
+          "title": "AC Deep Cleaning",
+          "image": "https://example.com/service.jpg"
+        },
+        "quantity": 1,
+        "price": 999,
+        "bookingDetails": {
+          "date": "2024-02-01",
+          "time": "10-12",
+          "address": "123 Main Street, Mumbai"
+        }
+      }
+    ],
+    "total": 2999,
+    "discount": 0,
+    "finalTotal": 2999,
+    "paymentOption": "payLater",
+    "paymentStatus": "pending",
+    "status": "pending",
+    "createdAt": "2024-01-15T10:00:00Z"
   }
 }
 ```
 
-**Status Codes:**
-- `201`: Created
-- `400`: Validation error
-- `500`: Server error
+**Important:** When creating an order:
+1. For rental items: Check product availability and update status if needed
+2. For service items: Create corresponding service booking records
+3. Notify admin about the new order
+4. If payment is successful, update payment status
 
 ---
 
-#### 10. Submit Contact Form
+### 10. Get User Orders
+**GET** `/users/:userId/orders`
+
+**Headers:**
 ```
-POST /api/contact
+Authorization: Bearer <token>
+```
+
+**Response (200):**
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "_id": "order_id",
+      "orderId": "ORD-2024-001",
+      "userId": "user_id",
+      "items": [
+        {
+          "type": "rental",
+          "productId": "product_id",
+          "product": {
+            "_id": "product_id",
+            "brand": "LG",
+            "model": "1.5 Ton Split AC",
+            "images": ["https://example.com/image1.jpg"]
+          },
+          "quantity": 1,
+          "price": 2000
+        }
+      ],
+      "total": 2000,
+      "discount": 0,
+      "finalTotal": 2000,
+      "paymentOption": "payLater",
+      "paymentStatus": "pending",
+      "status": "pending",
+      "createdAt": "2024-01-15T10:00:00Z",
+      "updatedAt": "2024-01-15T10:00:00Z"
+    }
+  ]
+}
+```
+
+---
+
+### 11. Get User Service Bookings
+**GET** `/service-bookings/my-bookings`
+
+**Headers:**
+```
+Authorization: Bearer <token>
+```
+
+**Response (200):**
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "_id": "booking_id",
+      "bookingId": "SB-2024-001",
+      "serviceId": "service_id",
+      "serviceTitle": "AC Deep Cleaning",
+      "servicePrice": 999,
+      "userId": "user_id",
+      "name": "John Doe",
+      "phone": "+919999999999",
+      "date": "2024-02-01",
+      "time": "10-12",
+      "address": "123 Main Street, Mumbai",
+      "addressType": "myself",
+      "contactName": "John Doe",
+      "contactPhone": "+919999999999",
+      "paymentOption": "payLater",
+      "paymentStatus": "pending",
+      "status": "New",
+      "createdAt": "2024-01-15T10:00:00Z"
+    }
+  ]
+}
+```
+
+---
+
+## User Profile
+
+### 12. Update User Profile
+**PATCH** `/users/profile`
+
+**Headers:**
+```
+Authorization: Bearer <token>
 ```
 
 **Request Body:**
 ```json
 {
-  "name": "John Doe",
-  "email": "john@example.com",
-  "phone": "1234567890",
-  "subject": "General Inquiry",
-  "message": "I have a question about your services"
+  "name": "John Doe Updated",
+  "phone": "+919999999999",
+  "address": "New Address"
 }
 ```
 
-**Response:**
+**Response (200):**
 ```json
 {
   "success": true,
-  "message": "Message sent successfully"
+  "message": "Profile updated successfully",
+  "data": {
+    "id": "user_id",
+    "name": "John Doe Updated",
+    "email": "john@example.com",
+    "phone": "+919999999999",
+    "address": "New Address",
+    "role": "user"
+  }
 }
 ```
-
-**Status Codes:**
-- `200`: Success
-- `400`: Validation error
-- `500`: Server error
 
 ---
 
-#### 11. Submit Vendor Listing Request
-```
-POST /api/vendor-listing-request
-```
+## Admin Endpoints
 
-**Request Body:**
-```json
-{
-  "name": "Vendor Name",
-  "phone": "1234567890",
-  "email": "vendor@example.com",
-  "message": "I want to list my products"
-}
+### 13. Get All Products (Admin)
+**GET** `/admin/products`
+
+**Headers:**
+```
+Authorization: Bearer <token>
 ```
 
-**Response:**
-```json
-{
-  "success": true,
-  "message": "Request submitted successfully. We will contact you soon."
-}
-```
-
-**Status Codes:**
-- `201`: Created
-- `400`: Validation error
-- `500`: Server error
-
----
-
-### Admin Product Management Endpoints
-
-**All admin endpoints require authentication with `role: "admin"`**
-
-#### 12. Get All Products (Admin)
-```
-GET /api/admin/products
-```
-
-**Query Parameters:**
-- `category` (optional): Filter by category
-
-**Response:**
+**Response (200):**
 ```json
 {
   "success": true,
   "data": [
     {
       "_id": "product_id",
-      "category": "AC",
-      "name": "1 Ton 3 Star Convertible Inverter Split AC",
       "brand": "LG",
-      "model": "LG123ABC",
-      "capacity": "1 Ton",
+      "model": "1.5 Ton Split AC",
+      "capacity": "1.5 Ton",
       "type": "Split",
+      "category": "AC",
+      "description": "Energy efficient split AC",
+      "location": "Mumbai",
       "status": "Available",
       "price": {
-        "monthly": 5000
+        "monthly": 2000,
+        "quarterly": 5500,
+        "yearly": 20000
       },
-      "images": ["https://cloudinary.com/image1.jpg"],
-      "createdAt": "2024-01-01T00:00:00.000Z"
+      "images": ["https://example.com/image1.jpg"],
+      "features": {},
+      "condition": "New",
+      "createdAt": "2024-01-15T10:00:00Z"
     }
   ]
 }
 ```
 
-**Status Codes:**
-- `200`: Success
-- `401`: Unauthorized
-- `500`: Server error
-
 ---
 
-#### 13. Create Product
+### 14. Create Product (Admin)
+**POST** `/admin/products`
+
+**Headers:**
 ```
-POST /api/admin/products
+Authorization: Bearer <token>
 ```
 
 **Request Body:**
 ```json
 {
-  "category": "AC",
-  "name": "1 Ton 3 Star Convertible Inverter Split AC",
   "brand": "LG",
-  "model": "LG123ABC",
-  "capacity": "1 Ton",
+  "model": "1.5 Ton Split AC",
+  "capacity": "1.5 Ton",
   "type": "Split",
-  "condition": "New",
-  "description": "Product description",
-  "location": "Mumbai, Maharashtra",
+  "category": "AC",
+  "description": "Energy efficient split AC",
+  "location": "Mumbai",
   "status": "Available",
-  "discount": 5,
   "price": {
-    "3": 15000,
-    "6": 28000,
-    "9": 40000,
-    "11": 50000,
-    "monthly": 5000
+    "monthly": 2000,
+    "quarterly": 5500,
+    "yearly": 20000
   },
-  "images": ["https://cloudinary.com/image1.jpg", "https://cloudinary.com/image2.jpg"],
+  "images": [
+    "https://example.com/image1.jpg",
+    "https://example.com/image2.jpg"
+  ],
   "features": {
-    "specs": ["Capacity/Size: 1T"],
-    "dimensions": "950\"L x 290\"B x 375\"H",
-    "safety": ["Period Maintenance"]
+    "energyRating": "5 Star",
+    "operationType": "Inverter",
+    "loadType": "Full Load"
   },
-  "energyRating": "",
-  "operationType": "",
-  "loadType": ""
+  "condition": "New"
 }
 ```
 
-**Response:**
+**Response (200):**
 ```json
 {
   "success": true,
   "message": "Product added successfully",
   "data": {
     "_id": "product_id",
+    "brand": "LG",
+    "model": "1.5 Ton Split AC",
     "category": "AC",
-    "name": "1 Ton 3 Star Convertible Inverter Split AC",
-    "createdAt": "2024-01-01T00:00:00.000Z"
+    "status": "Available",
+    "createdAt": "2024-01-15T10:00:00Z"
   }
 }
 ```
 
-**Status Codes:**
-- `201`: Created
-- `400`: Validation error
-- `401`: Unauthorized
-- `500`: Server error
-
 ---
 
-#### 14. Update Product
+### 15. Update Product (Admin)
+**PATCH** `/admin/products/:id`
+
+**Headers:**
 ```
-PATCH /api/admin/products/:id
+Authorization: Bearer <token>
 ```
 
-**Request Body:** (All fields optional, only send fields to update)
+**Request Body:** (All fields optional)
 ```json
 {
-  "name": "Updated Product Name",
   "status": "Rented Out",
   "price": {
-    "monthly": 5500
-  },
-  "images": ["https://cloudinary.com/new-image.jpg"]
+    "monthly": 2200
+  }
 }
 ```
 
-**Response:**
+**Response (200):**
 ```json
 {
   "success": true,
   "message": "Product updated successfully",
   "data": {
     "_id": "product_id",
-    "name": "Updated Product Name",
-    "updatedAt": "2024-01-01T00:00:00.000Z"
+    "status": "Rented Out",
+    "updatedAt": "2024-01-15T10:00:00Z"
   }
 }
 ```
 
-**Status Codes:**
-- `200`: Success
-- `400`: Validation error
-- `401`: Unauthorized
-- `404`: Product not found
-- `500`: Server error
-
 ---
 
-#### 15. Delete Product
+### 16. Delete Product (Admin)
+**DELETE** `/admin/products/:id`
+
+**Headers:**
 ```
-DELETE /api/admin/products/:id
+Authorization: Bearer <token>
 ```
 
-**Response:**
+**Response (200):**
 ```json
 {
   "success": true,
@@ -830,156 +704,58 @@ DELETE /api/admin/products/:id
 }
 ```
 
-**Status Codes:**
-- `200`: Success
-- `401`: Unauthorized
-- `404`: Product not found
-- `500`: Server error
-
 ---
 
-### Admin Service Management Endpoints
+### 17. Get All Service Bookings (Admin)
+**GET** `/admin/service-bookings`
 
-#### 16. Add Service
+**Headers:**
 ```
-POST /api/admin/services
-```
-
-**Request Body:**
-```json
-{
-  "title": "AC Repair Service",
-  "description": "Professional AC repair",
-  "price": 500,
-  "originalPrice": 700,
-  "badge": "Visit Within 1 Hour",
-  "image": "https://cloudinary.com/service.jpg",
-  "process": ["Step 1", "Step 2"],
-  "benefits": ["Benefit 1", "Benefit 2"],
-  "keyFeatures": ["Feature 1", "Feature 2"],
-  "recommendedFrequency": "Every 3 months"
-}
+Authorization: Bearer <token>
 ```
 
-**Response:**
-```json
-{
-  "success": true,
-  "message": "Service added successfully",
-  "data": {
-    "_id": "service_id",
-    "title": "AC Repair Service",
-    "createdAt": "2024-01-01T00:00:00.000Z"
-  }
-}
-```
-
-**Status Codes:**
-- `201`: Created
-- `400`: Validation error
-- `401`: Unauthorized
-- `500`: Server error
-
----
-
-#### 17. Update Service
-```
-PATCH /api/admin/services/:id
-```
-
-**Request Body:** (All fields optional)
-```json
-{
-  "title": "Updated Service Title",
-  "price": 600
-}
-```
-
-**Response:**
-```json
-{
-  "success": true,
-  "message": "Service updated successfully",
-  "data": {
-    "_id": "service_id",
-    "title": "Updated Service Title"
-  }
-}
-```
-
-**Status Codes:**
-- `200`: Success
-- `400`: Validation error
-- `401`: Unauthorized
-- `404`: Service not found
-- `500`: Server error
-
----
-
-#### 18. Delete Service
-```
-DELETE /api/admin/services/:id
-```
-
-**Response:**
-```json
-{
-  "success": true,
-  "message": "Service deleted successfully"
-}
-```
-
-**Status Codes:**
-- `200`: Success
-- `401`: Unauthorized
-- `404`: Service not found
-- `500`: Server error
-
----
-
-### Admin Lead Management Endpoints
-
-#### 19. Get Service Bookings (Leads)
-```
-GET /api/admin/service-bookings
-```
-
-**Response:**
+**Response (200):**
 ```json
 {
   "success": true,
   "data": [
     {
       "_id": "booking_id",
-      "serviceId": {
-        "_id": "service_id",
-        "title": "AC Repair Service"
+      "bookingId": "SB-2024-001",
+      "serviceId": "service_id",
+      "serviceTitle": "AC Deep Cleaning",
+      "servicePrice": 999,
+      "userId": "user_id",
+      "user": {
+        "name": "John Doe",
+        "email": "john@example.com",
+        "phone": "+919999999999"
       },
       "name": "John Doe",
-      "phone": "1234567890",
-      "email": "john@example.com",
-      "address": "123 Main St",
-      "preferredDate": "2024-01-15",
-      "preferredTime": "10:00 AM",
-      "description": "AC not cooling",
-      "images": ["https://cloudinary.com/issue1.jpg"],
+      "phone": "+919999999999",
+      "date": "2024-02-01",
+      "time": "10-12",
+      "address": "123 Main Street, Mumbai",
+      "addressType": "myself",
+      "contactName": "John Doe",
+      "contactPhone": "+919999999999",
+      "paymentOption": "payLater",
+      "paymentStatus": "pending",
       "status": "New",
-      "createdAt": "2024-01-01T00:00:00.000Z"
+      "createdAt": "2024-01-15T10:00:00Z"
     }
   ]
 }
 ```
 
-**Status Codes:**
-- `200`: Success
-- `401`: Unauthorized
-- `500`: Server error
-
 ---
 
-#### 20. Update Service Booking Status
+### 18. Update Service Booking Status (Admin)
+**PATCH** `/admin/service-bookings/:id`
+
+**Headers:**
 ```
-PATCH /api/admin/service-bookings/:id
+Authorization: Bearer <token>
 ```
 
 **Request Body:**
@@ -989,7 +765,15 @@ PATCH /api/admin/service-bookings/:id
 }
 ```
 
-**Response:**
+**Status Values:**
+- `"New"` - New booking
+- `"Contacted"` - Admin has contacted the user
+- `"In-Progress"` - Service is in progress
+- `"Resolved"` - Service completed
+- `"Rejected"` - Booking rejected
+- `"Cancelled"` - Booking cancelled
+
+**Response (200):**
 ```json
 {
   "success": true,
@@ -997,59 +781,53 @@ PATCH /api/admin/service-bookings/:id
   "data": {
     "_id": "booking_id",
     "status": "Contacted",
-    "updatedAt": "2024-01-01T00:00:00.000Z"
+    "updatedAt": "2024-01-15T10:00:00Z"
   }
 }
 ```
 
-**Status Codes:**
-- `200`: Success
-- `400`: Invalid status
-- `401`: Unauthorized
-- `404`: Booking not found
-- `500`: Server error
-
 ---
 
-#### 21. Get Rental Inquiries
+### 19. Get All Rental Inquiries (Admin)
+**GET** `/admin/rental-inquiries`
+
+**Headers:**
 ```
-GET /api/admin/rental-inquiries
+Authorization: Bearer <token>
 ```
 
-**Response:**
+**Response (200):**
 ```json
 {
   "success": true,
   "data": [
     {
       "_id": "inquiry_id",
-      "productId": "product_id",
-      "productCategory": "AC",
-      "name": "John Doe",
-      "phone": "1234567890",
-      "email": "john@example.com",
-      "message": "I'm interested",
-      "acDetails": {
+      "acId": "product_id",
+      "product": {
         "brand": "LG",
-        "model": "LG123ABC"
+        "model": "1.5 Ton Split AC"
       },
+      "name": "John Doe",
+      "email": "john@example.com",
+      "phone": "+919999999999",
+      "duration": "Monthly",
+      "message": "Interested in renting this AC",
       "status": "Pending",
-      "createdAt": "2024-01-01T00:00:00.000Z"
+      "createdAt": "2024-01-15T10:00:00Z"
     }
   ]
 }
 ```
 
-**Status Codes:**
-- `200`: Success
-- `401`: Unauthorized
-- `500`: Server error
-
 ---
 
-#### 22. Update Rental Inquiry Status
+### 20. Update Rental Inquiry Status (Admin)
+**PATCH** `/admin/rental-inquiries/:id`
+
+**Headers:**
 ```
-PATCH /api/admin/rental-inquiries/:id
+Authorization: Bearer <token>
 ```
 
 **Request Body:**
@@ -1059,7 +837,14 @@ PATCH /api/admin/rental-inquiries/:id
 }
 ```
 
-**Response:**
+**Status Values:**
+- `"Pending"` - New inquiry
+- `"Contacted"` - Admin has contacted the user
+- `"In-Progress"` - Processing
+- `"Resolved"` - Inquiry resolved
+- `"Rejected"` - Inquiry rejected
+
+**Response (200):**
 ```json
 {
   "success": true,
@@ -1067,331 +852,579 @@ PATCH /api/admin/rental-inquiries/:id
   "data": {
     "_id": "inquiry_id",
     "status": "Contacted",
-    "updatedAt": "2024-01-01T00:00:00.000Z"
+    "updatedAt": "2024-01-15T10:00:00Z"
   }
 }
 ```
 
-**Status Codes:**
-- `200`: Success
-- `400`: Invalid status
-- `401`: Unauthorized
-- `404`: Inquiry not found
-- `500`: Server error
-
 ---
 
-#### 23. Get Vendor Requests
+### 21. Create Service (Admin)
+**POST** `/admin/services`
+
+**Headers:**
 ```
-GET /api/admin/vendor-requests
+Authorization: Bearer <token>
 ```
 
-**Response:**
+**Request Body:**
 ```json
 {
-  "success": true,
-  "data": [
-    {
-      "_id": "request_id",
-      "name": "Vendor Name",
-      "phone": "1234567890",
-      "email": "vendor@example.com",
-      "message": "I want to list products",
-      "createdAt": "2024-01-01T00:00:00.000Z"
-    }
-  ]
+  "title": "AC Deep Cleaning",
+  "description": "Complete deep cleaning service for your AC",
+  "price": 999,
+  "image": "https://example.com/service.jpg"
 }
 ```
 
-**Status Codes:**
-- `200`: Success
-- `401`: Unauthorized
-- `500`: Server error
+**Response (200):**
+```json
+{
+  "success": true,
+  "message": "Service added successfully",
+  "data": {
+    "_id": "service_id",
+    "title": "AC Deep Cleaning",
+    "description": "Complete deep cleaning service for your AC",
+    "price": 999,
+    "image": "https://example.com/service.jpg",
+    "createdAt": "2024-01-15T10:00:00Z"
+  }
+}
+```
 
 ---
 
-### User Endpoints
+### 22. Update Service (Admin)
+**PATCH** `/admin/services/:id`
 
-#### 24. Get User Orders
+**Headers:**
 ```
-GET /api/users/:userId/orders
+Authorization: Bearer <token>
 ```
 
-**Headers:** `Authorization: Bearer <token>`
+**Request Body:** (All fields optional)
+```json
+{
+  "price": 799
+}
+```
 
-**Response:**
+**Response (200):**
+```json
+{
+  "success": true,
+  "message": "Service updated successfully",
+  "data": {
+    "_id": "service_id",
+    "price": 799,
+    "updatedAt": "2024-01-15T10:00:00Z"
+  }
+}
+```
+
+---
+
+### 23. Delete Service (Admin)
+**DELETE** `/admin/services/:id`
+
+**Headers:**
+```
+Authorization: Bearer <token>
+```
+
+**Response (200):**
+```json
+{
+  "success": true,
+  "message": "Service deleted successfully"
+}
+```
+
+---
+
+### 24. Get All Orders (Admin)
+**GET** `/admin/orders`
+
+**Headers:**
+```
+Authorization: Bearer <token>
+```
+
+**Query Parameters:**
+- `status` (optional): Filter by order status
+- `paymentStatus` (optional): Filter by payment status
+- `page` (optional): Page number
+- `limit` (optional): Items per page
+
+**Response (200):**
 ```json
 {
   "success": true,
   "data": [
     {
       "_id": "order_id",
+      "orderId": "ORD-2024-001",
       "userId": "user_id",
-      "products": [
+      "user": {
+        "name": "John Doe",
+        "email": "john@example.com",
+        "phone": "+919999999999"
+      },
+      "items": [
         {
+          "type": "rental",
           "productId": "product_id",
+          "product": {
+            "brand": "LG",
+            "model": "1.5 Ton Split AC"
+          },
           "quantity": 1,
-          "price": 5000
+          "price": 2000
         }
       ],
-      "total": 5000,
-      "status": "Pending",
-      "createdAt": "2024-01-01T00:00:00.000Z"
+      "total": 2000,
+      "discount": 0,
+      "finalTotal": 2000,
+      "paymentOption": "payLater",
+      "paymentStatus": "pending",
+      "status": "pending",
+      "createdAt": "2024-01-15T10:00:00Z"
     }
-  ]
+  ],
+  "total": 100
 }
 ```
 
-**Status Codes:**
-- `200`: Success
-- `401`: Unauthorized
-- `403`: Forbidden (user can only view own orders)
-- `500`: Server error
-
 ---
 
-#### 25. Update User Profile
-```
-PATCH /api/users/profile
-```
+### 25. Update Order Status (Admin)
+**PATCH** `/admin/orders/:id`
 
-**Headers:** `Authorization: Bearer <token>`
+**Headers:**
+```
+Authorization: Bearer <token>
+```
 
 **Request Body:**
 ```json
 {
-  "name": "Updated Name",
-  "phone": "9876543210",
-  "homeAddress": "New Address",
-  "interestedIn": ["AC", "Refrigerator"]
+  "status": "confirmed"
 }
 ```
 
-**Response:**
+**Status Values:**
+- `"pending"` - Order placed, awaiting confirmation
+- `"confirmed"` - Order confirmed
+- `"processing"` - Order being processed
+- `"shipped"` - Order shipped (for rentals)
+- `"delivered"` - Order delivered (for rentals)
+- `"completed"` - Order completed
+- `"cancelled"` - Order cancelled
+
+**Response (200):**
 ```json
 {
   "success": true,
-  "message": "Profile updated successfully",
+  "message": "Order status updated successfully",
   "data": {
-    "_id": "user_id",
-    "name": "Updated Name",
-    "phone": "9876543210",
-    "updatedAt": "2024-01-01T00:00:00.000Z"
+    "_id": "order_id",
+    "status": "confirmed",
+    "updatedAt": "2024-01-15T10:00:00Z"
   }
 }
 ```
 
-**Status Codes:**
-- `200`: Success
-- `400`: Validation error
-- `401`: Unauthorized
-- `500`: Server error
-
 ---
 
-## Error Handling
+## Public Contact Endpoints
 
-### Standard Error Response Format
+### 26. Create Lead
+**POST** `/leads`
 
+**Request Body:**
 ```json
 {
-  "success": false,
-  "message": "Error message describing what went wrong"
+  "name": "John Doe",
+  "phone": "+919999999999",
+  "message": "Interested in your services"
 }
 ```
 
-### HTTP Status Codes
-
-- `200`: Success
-- `201`: Created
-- `400`: Bad Request (validation error)
-- `401`: Unauthorized (missing or invalid token)
-- `403`: Forbidden (insufficient permissions)
-- `404`: Not Found
-- `500`: Internal Server Error
-
-### Common Error Messages
-
-- **Authentication Errors:**
-  - `"Invalid email or password"`
-  - `"Token expired"`
-  - `"Unauthorized access"`
-
-- **Validation Errors:**
-  - `"Please fill all required fields"`
-  - `"Invalid email format"`
-  - `"Phone number must be 10 digits"`
-  - `"Password must be at least 6 characters"`
-
-- **Resource Errors:**
-  - `"Product not found"`
-  - `"Service not found"`
-  - `"User already exists with this email"`
+**Response (200):**
+```json
+{
+  "success": true,
+  "message": "Thank you! We will contact you soon.",
+  "data": {
+    "_id": "lead_id",
+    "name": "John Doe",
+    "phone": "+919999999999",
+    "message": "Interested in your services",
+    "createdAt": "2024-01-15T10:00:00Z"
+  }
+}
+```
 
 ---
 
-## Integration Notes
+### 27. Submit Contact Form
+**POST** `/contact`
 
-### 1. Image Upload
-- Frontend uploads images to Cloudinary before sending to backend
-- Backend receives image URLs (not files)
-- First image in `images` array is the hero/primary image
+**Request Body:**
+```json
+{
+  "name": "John Doe",
+  "email": "john@example.com",
+  "phone": "+919999999999",
+  "message": "Hello, I have a question"
+}
+```
 
-### 2. Price Structure
-- All products must have prices for: 3 months, 6 months, 9 months, 11 months, and monthly
-- Prices are in Indian Rupees (₹)
+**Response (200):**
+```json
+{
+  "success": true,
+  "message": "Message sent successfully"
+}
+```
 
-### 3. Category-Specific Fields
-- **Refrigerator**: `energyRating` (optional)
-- **Washing Machine**: `operationType` and `loadType` (optional)
-- **AC**: No additional fields
+---
 
-### 4. Status Values
-- **Product Status**: `"Available"`, `"Rented Out"`, `"Under Maintenance"`
-- **Service Booking Status**: `"New"`, `"Contacted"`, `"In-Progress"`, `"Resolved"`, `"Rejected"`
-- **Rental Inquiry Status**: `"Pending"`, `"Contacted"`, `"Completed"`, `"Cancelled"`
+### 28. Submit Vendor Listing Request
+**POST** `/vendor-listing-request`
 
-### 5. Phone Number Format
-- Frontend sends phone numbers as strings
-- Format: 10 digits (e.g., "1234567890")
-- Backend should validate and store as string
+**Request Body:**
+```json
+{
+  "name": "Vendor Name",
+  "phone": "+919999999999",
+  "businessName": "Cool Air Services",
+  "message": "I want to list my products"
+}
+```
 
-### 6. Date Format
-- All dates should be in ISO 8601 format: `"2024-01-01T00:00:00.000Z"`
-- Frontend displays dates in local format
+**Response (200):**
+```json
+{
+  "success": true,
+  "message": "Request submitted successfully. We will contact you soon."
+}
+```
 
-### 7. Pagination (Future Enhancement)
-- Currently, all endpoints return all results
-- Consider adding pagination for large datasets:
-  - Query params: `page`, `limit`
-  - Response: Include `total`, `page`, `limit`, `totalPages`
+---
 
-### 8. Search & Filtering
-- Product search supports: brand, model, location
-- Filters: category, capacity, type, location, duration
-- Backend should implement case-insensitive search
+## Data Structures
 
-### 9. Backward Compatibility
-- Keep `/api/admin/acs` endpoint working (can redirect to `/api/admin/products?category=AC`)
-- Support both `acId` and `productId` in rental inquiries
-- Support both `acDetails` and product reference in responses
+### Product Schema
+```typescript
+{
+  _id: string;
+  brand: string;
+  model: string;
+  capacity: string;
+  type: string; // "Split", "Window", etc.
+  category: "AC" | "Refrigerator" | "Washing Machine";
+  description: string;
+  location: string;
+  status: "Available" | "Rented Out";
+  price: {
+    monthly: number;
+    quarterly?: number;
+    yearly?: number;
+  };
+  images: string[];
+  features: {
+    energyRating?: string;
+    operationType?: string;
+    loadType?: string;
+    [key: string]: any;
+  };
+  condition: "New" | "Used" | "Refurbished";
+  createdAt: Date;
+  updatedAt: Date;
+}
+```
 
-### 10. Security Considerations
-- Hash passwords using bcrypt (salt rounds: 10)
-- Validate JWT tokens on all protected routes
-- Check user role for admin endpoints
-- Sanitize user inputs to prevent injection attacks
-- Use HTTPS in production
-- Implement rate limiting for API endpoints
+### Service Schema
+```typescript
+{
+  _id: string;
+  title: string;
+  description: string;
+  price: number;
+  image?: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
+```
+
+### Service Booking Schema
+```typescript
+{
+  _id: string;
+  bookingId: string; // Auto-generated: "SB-YYYY-XXX"
+  serviceId: string;
+  serviceTitle: string;
+  servicePrice: number;
+  userId: string;
+  name: string;
+  phone: string; // E.164 format: "+919999999999"
+  date: string; // ISO date: "2024-02-01"
+  time: string; // Time slot: "10-12", "12-2", "2-4", "4-6", "6-8"
+  address: string;
+  addressType: "myself" | "other";
+  contactName: string;
+  contactPhone: string;
+  paymentOption: "payNow" | "payLater";
+  paymentStatus: "paid" | "pending";
+  status: "New" | "Contacted" | "In-Progress" | "Resolved" | "Rejected" | "Cancelled";
+  createdAt: Date;
+  updatedAt: Date;
+}
+```
+
+### Order Schema
+```typescript
+{
+  _id: string;
+  orderId: string; // Auto-generated: "ORD-YYYY-XXX"
+  userId: string;
+  items: Array<{
+    type: "rental" | "service";
+    productId?: string; // For rental items
+    serviceId?: string; // For service items
+    quantity: number;
+    price: number;
+    bookingDetails?: { // For service items
+      date: string;
+      time: string;
+      address: string;
+      addressType: string;
+      contactName: string;
+      contactPhone: string;
+      paymentOption: string;
+    };
+  }>;
+  total: number;
+  discount: number; // 5% discount if payNow
+  finalTotal: number;
+  paymentOption: "payNow" | "payLater";
+  paymentStatus: "paid" | "pending";
+  status: "pending" | "confirmed" | "processing" | "shipped" | "delivered" | "completed" | "cancelled";
+  createdAt: Date;
+  updatedAt: Date;
+}
+```
+
+### User Schema
+```typescript
+{
+  _id: string;
+  name: string;
+  email: string;
+  password: string; // Hashed
+  phone: string;
+  role: "user" | "admin";
+  address?: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
+```
+
+### Rental Inquiry Schema
+```typescript
+{
+  _id: string;
+  acId: string;
+  name: string;
+  email: string;
+  phone: string;
+  duration: string; // "Monthly", "Quarterly", "Yearly"
+  message?: string;
+  status: "Pending" | "Contacted" | "In-Progress" | "Resolved" | "Rejected";
+  createdAt: Date;
+  updatedAt: Date;
+}
+```
+
+---
+
+## Payment Flow
+
+### Pay Now Flow
+1. User selects "Pay Now" option during checkout
+2. Frontend sends order with `paymentOption: "payNow"` and `paymentStatus: "pending"` initially
+3. Backend:
+   - Creates order with `paymentStatus: "pending"` and `status: "pending"`
+   - Applies 5% discount to final total
+   - Initiates payment gateway integration (Razorpay/Stripe/etc.)
+   - Returns payment gateway order details to frontend
+4. Frontend:
+   - Redirects user to payment gateway
+   - User completes payment
+   - Payment gateway redirects back with payment status
+5. Backend (via webhook or callback):
+   - Verifies payment
+   - Updates order with `paymentStatus: "paid"` and `status: "confirmed"`
+   - Creates service bookings (if any) with `paymentStatus: "paid"`
+   - Updates product availability (if rental items)
+   - Notifies admin about the confirmed order
+6. User sees order in "My Orders" with status "confirmed"
+
+**Alternative Simple Flow (Current Implementation):**
+- Frontend can send order with `paymentStatus: "paid"` directly if payment is processed client-side
+- Backend should still verify payment before confirming order
+
+### Pay Later Flow
+1. User selects "Pay Later" option during checkout
+2. Frontend sends order with `paymentOption: "payLater"` and `paymentStatus: "pending"`
+3. Backend:
+   - Creates order with `paymentStatus: "pending"` and `status: "pending"`
+   - Creates service bookings (if any) with `paymentStatus: "pending"`
+   - Notifies admin about the pending order
+4. User sees order in "My Orders" with status "pending"
+5. Admin can see pending orders and update status
+6. User can pay later (implement payment gateway integration for pending orders)
+
+---
+
+## Order Creation Flow
+
+### When User Places Order:
+
+1. **Cart Contains Rental Products:**
+   - Check product availability
+   - Update product status if needed
+   - Create order items for rentals
+
+2. **Cart Contains Services:**
+   - Create service booking records
+   - Link service bookings to order
+   - Store booking details (date, time, address, etc.)
+
+3. **Payment Processing:**
+   - If `payNow`: Process payment → Update status to "confirmed"
+   - If `payLater`: Set status to "pending"
+
+4. **Admin Notification:**
+   - Send notification/email to admin about new order
+   - Include order details and payment status
+
+5. **User Notification:**
+   - Send confirmation email/SMS to user
+   - Include order ID and details
+
+---
+
+## Important Notes
+
+1. **Authentication:**
+   - All admin endpoints require `Authorization: Bearer <token>` header
+   - User endpoints require authentication for user-specific data
+   - Public endpoints (products, services listing) don't require auth
+
+2. **Payment Integration:**
+   - Integrate with payment gateway (Razorpay, Stripe, etc.) for "Pay Now" option
+   - **Recommended Flow:**
+     - Create order with `paymentStatus: "pending"`
+     - Generate payment gateway order/checkout session
+     - Return payment gateway details to frontend
+     - Frontend redirects to payment gateway
+     - Handle payment success/failure webhooks
+     - Update order status based on payment result
+   - Store payment transaction IDs in order/service booking records
+   - Implement webhook handlers for payment callbacks
+   - Verify payment signatures before updating order status
+
+3. **Order ID Generation:**
+   - Format: `ORD-YYYY-XXX` (e.g., `ORD-2024-001`)
+   - Service Booking ID: `SB-YYYY-XXX` (e.g., `SB-2024-001`)
+
+4. **Phone Number Format:**
+   - Use E.164 format: `+919999999999`
+   - Validate phone numbers on backend
+
+5. **Image URLs:**
+   - Frontend uploads images to Cloudinary
+   - Backend receives image URLs (not files)
+   - Store array of image URLs in product/service records
+
+6. **Discount Calculation:**
+   - 5% discount applied when `paymentOption === "payNow"`
+   - Calculate: `discount = total * 0.05`
+   - Final total: `finalTotal = total - discount`
+
+7. **Status Management:**
+   - Products: `"Available"`, `"Rented Out"`
+   - Orders: `"pending"`, `"confirmed"`, `"processing"`, `"shipped"`, `"delivered"`, `"completed"`, `"cancelled"`
+   - Service Bookings: `"New"`, `"Contacted"`, `"In-Progress"`, `"Resolved"`, `"Rejected"`, `"Cancelled"`
+   - Payment: `"paid"`, `"pending"`
+
+8. **Error Handling:**
+   - All endpoints should return consistent error format:
+   ```json
+   {
+     "success": false,
+     "message": "Error message here"
+   }
+   ```
+   - Use appropriate HTTP status codes (400, 401, 404, 500)
+
+9. **Pagination:**
+   - Implement pagination for list endpoints
+   - Use `page` and `limit` query parameters
+   - Return `total` count in response
+
+10. **Notifications:**
+    - Notify admin when:
+      - New order is placed
+      - New service booking is created
+      - New rental inquiry is submitted
+    - Notify user when:
+      - Order is confirmed
+      - Order status is updated
+      - Service booking is confirmed
 
 ---
 
 ## Testing Checklist
 
-### Authentication
-- [ ] Login with valid user credentials
-- [ ] Login with valid admin credentials
-- [ ] Login with invalid credentials
-- [ ] Signup with new user
-- [ ] Signup with existing email
-- [ ] Forgot password with valid email
-- [ ] Forgot password with invalid email
-
-### Products
-- [ ] Get all products (public)
-- [ ] Get products by category
-- [ ] Get product by ID
-- [ ] Create product (admin)
-- [ ] Update product (admin)
-- [ ] Delete product (admin)
-- [ ] Filter products by various criteria
-
-### Services
-- [ ] Get all services (public)
-- [ ] Create service booking (public)
-- [ ] Add service (admin)
-- [ ] Update service (admin)
-- [ ] Delete service (admin)
-
-### Leads & Inquiries
+- [ ] User signup and login
+- [ ] Admin login
+- [ ] Get products with filters
 - [ ] Create rental inquiry
-- [ ] Create lead
-- [ ] Submit contact form
-- [ ] Submit vendor request
-- [ ] Get service bookings (admin)
-- [ ] Update service booking status (admin)
-- [ ] Get rental inquiries (admin)
-- [ ] Update rental inquiry status (admin)
-- [ ] Get vendor requests (admin)
-
-### Authorization
-- [ ] Access admin endpoints without token
-- [ ] Access admin endpoints with user token
-- [ ] Access admin endpoints with admin token
-- [ ] Access user endpoints with valid token
-- [ ] Access user endpoints without token
+- [ ] Create service booking (pay now and pay later)
+- [ ] Create order with rentals and services
+- [ ] Get user orders
+- [ ] Get user service bookings
+- [ ] Admin: Create/Update/Delete products
+- [ ] Admin: View and update service bookings
+- [ ] Admin: View and update rental inquiries
+- [ ] Admin: View and update orders
+- [ ] Payment flow (pay now)
+- [ ] Payment flow (pay later)
+- [ ] Order status updates
+- [ ] Service booking status updates
 
 ---
 
 ## Environment Variables
 
-```env
-# Server
+Backend should use these environment variables:
+```
 PORT=5000
-NODE_ENV=development
-
-# Database
 MONGODB_URI=mongodb://localhost:27017/rental-service
-
-# JWT
-JWT_SECRET=your-secret-key-here
-
-# Cloudinary (if backend handles uploads)
-CLOUDINARY_CLOUD_NAME=your-cloud-name
-CLOUDINARY_API_KEY=your-api-key
-CLOUDINARY_API_SECRET=your-api-secret
-
-# Email (for forgot password)
-SMTP_HOST=smtp.gmail.com
-SMTP_PORT=587
-SMTP_USER=your-email@gmail.com
-SMTP_PASS=your-app-password
+JWT_SECRET=your-secret-key
+JWT_EXPIRES_IN=7d
+PAYMENT_GATEWAY_KEY=your-payment-gateway-key
+PAYMENT_GATEWAY_SECRET=your-payment-gateway-secret
+EMAIL_SERVICE_API_KEY=your-email-service-key
 ```
 
 ---
 
-## Database Indexes
+## Support
 
-Recommended indexes for optimal performance:
-
-```javascript
-// User Model
-db.users.createIndex({ email: 1 }, { unique: true })
-db.users.createIndex({ role: 1 })
-
-// Product Model
-db.products.createIndex({ category: 1 })
-db.products.createIndex({ status: 1 })
-db.products.createIndex({ location: 1 })
-db.products.createIndex({ brand: 1 })
-db.products.createIndex({ createdAt: -1 })
-
-// Service Booking Model
-db.servicebookings.createIndex({ status: 1 })
-db.servicebookings.createIndex({ createdAt: -1 })
-
-// Rental Inquiry Model
-db.rentalinquiries.createIndex({ productCategory: 1 })
-db.rentalinquiries.createIndex({ status: 1 })
-db.rentalinquiries.createIndex({ createdAt: -1 })
-```
-
----
-
-## Support & Contact
-
-For questions or issues regarding API integration, please contact the development team.
-
-**Last Updated:** January 2024
-**Version:** 1.0.0
+For any questions or clarifications, please refer to the frontend code in `src/services/api.js` to see the exact request/response formats expected.
 

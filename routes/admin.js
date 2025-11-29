@@ -31,6 +31,7 @@ const {
   deleteProduct
 } = require('../controllers/productController');
 const {
+  getAllOrders,
   updateOrderStatus
 } = require('../controllers/orderController');
 const {
@@ -66,8 +67,8 @@ router.patch('/services/:id', auth, updateService);
 router.delete('/services/:id', auth, deleteService);
 
 // Admin service bookings routes
-router.get('/service-bookings', auth, getAllServiceBookings);
-router.patch('/service-bookings/:id', auth, updateServiceBookingStatus);
+router.get('/service-bookings', adminAuth, getAllServiceBookings);
+router.patch('/service-bookings/:id', adminAuth, updateServiceBookingStatus);
 
 // Admin product routes (from BACKEND_UPDATES.md)
 router.get('/products', adminAuth, getProducts);
@@ -75,8 +76,9 @@ router.post('/products', adminAuth, createProduct);
 router.patch('/products/:id', adminAuth, updateProduct);
 router.delete('/products/:id', adminAuth, deleteProduct);
 
-// Admin order routes (from BACKEND_UPDATES.md)
-router.patch('/orders/:orderId', adminAuth, updateOrderStatus);
+// Admin order routes
+router.get('/orders', adminAuth, getAllOrders);
+router.patch('/orders/:id', adminAuth, updateOrderStatus);
 
 // Admin service request routes (from BACKEND_UPDATES.md)
 router.get('/service-requests', adminAuth, getAllServiceRequests);

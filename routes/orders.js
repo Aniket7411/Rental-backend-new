@@ -3,14 +3,19 @@ const router = express.Router();
 const {
   getUserOrders,
   getOrderById,
-  createOrder
+  createOrder,
+  updateOrderStatus,
+  cancelOrder
 } = require('../controllers/orderController');
-const { auth } = require('../middleware/auth');
+const { auth, adminAuth } = require('../middleware/auth');
 
-// User routes only
-router.get('/', auth, getUserOrders);
+// User routes
 router.get('/:orderId', auth, getOrderById);
 router.post('/', auth, createOrder);
+router.post('/:orderId/cancel', auth, cancelOrder);
+
+// Admin routes
+router.patch('/:orderId/status', adminAuth, updateOrderStatus);
 
 module.exports = router;
 

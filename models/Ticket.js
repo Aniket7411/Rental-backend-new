@@ -34,6 +34,32 @@ const ticketSchema = new mongoose.Schema({
     enum: ['new', 'open', 'in-progress', 'resolved', 'closed'],
     default: 'new'
   },
+  // Optional references to related entities
+  relatedOrder: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Order',
+    default: null
+  },
+  relatedServiceBooking: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'ServiceBooking',
+    default: null
+  },
+  relatedServiceRequest: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'ServiceRequest',
+    default: null
+  },
+  relatedRentalInquiry: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'RentalInquiry',
+    default: null
+  },
+  // File attachments (array of URLs)
+  attachments: {
+    type: [String],
+    default: []
+  },
   adminRemark: {
     type: String,
     trim: true,
@@ -52,6 +78,9 @@ ticketSchema.index({ user: 1, createdAt: -1 });
 ticketSchema.index({ status: 1 });
 ticketSchema.index({ priority: 1 });
 ticketSchema.index({ category: 1 });
+ticketSchema.index({ relatedOrder: 1 });
+ticketSchema.index({ relatedServiceBooking: 1 });
+ticketSchema.index({ relatedServiceRequest: 1 });
 
 module.exports = mongoose.model('Ticket', ticketSchema);
 

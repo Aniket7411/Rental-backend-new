@@ -275,6 +275,15 @@ exports.validateServiceBooking = [
     .withMessage('Service ID is required')
     .isMongoId()
     .withMessage('Service ID must be a valid ObjectId'),
+  body('serviceTitle')
+    .trim()
+    .notEmpty()
+    .withMessage('Service title is required'),
+  body('servicePrice')
+    .notEmpty()
+    .withMessage('Service price is required')
+    .isFloat({ min: 0 })
+    .withMessage('Service price must be a positive number'),
   body('name')
     .trim()
     .notEmpty()
@@ -290,39 +299,79 @@ exports.validateServiceBooking = [
     })
     .matches(/^\+[1-9]\d{1,14}$/)
     .withMessage('Please provide a valid E.164 phone number (e.g., +919999999999)'),
-  body('preferredDate')
-    .custom((value, { req }) => {
-      const dateVal = (req.body.preferredDate || req.body.date || '').toString().trim();
-      if (!dateVal) {
-        throw new Error('Preferred date is required');
-      }
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(dateVal)) {
-        throw new Error('Date must be in YYYY-MM-DD format');
-      }
-      return true;
-    }),
-  body('preferredTime')
-    .custom((value, { req }) => {
-      const timeVal = (req.body.preferredTime || req.body.time || '').toString().trim();
-      if (!timeVal) {
-        throw new Error('Preferred time is required');
-      }
-      const is24h = /^([01]\d|2[0-3]):[0-5]\d$/.test(timeVal);
-      const isAmPm = /^(0?[1-9]|1[0-2]):[0-5]\d\s?(AM|PM)$/i.test(timeVal);
-      if (!is24h && !isAmPm) {
-        throw new Error('Time must be in HH:mm 24-hour format');
+  body('date')
+    .trim()
+    .notEmpty()
+    .withMessage('Date is required')
+    .matches(/^\d{4}-\d{2}-\d{2}$/)
+    .withMessage('Date must be in YYYY-MM-DD format')
+    .custom((value) => {
+      const bookingDate = new Date(value);
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      if (bookingDate <= today) {
+        throw new Error('Booking date must be in the future');
       }
       return true;
     }),
+  body('time')
+    .trim()
+    .notEmpty()
+    .withMessage('Time slot is required')
+    .isIn(['10-12', '12-2', '2-4', '4-6', '6-8'])
+    .withMessage('Invalid time slot. Valid slots are: 10-12, 12-2, 2-4, 4-6, 6-8'),
   body('address')
     .trim()
     .notEmpty()
     .withMessage('Address is required')
     .isLength({ min: 10 })
     .withMessage('Address must be at least 10 characters long'),
-  body('notes')
+  body('addressType')
+    .trim()
+    .notEmpty()
+    .withMessage('Address type is required')
+    .isIn(['myself', 'other'])
+    .withMessage('Address type must be either "myself" or "other"'),
+  body('contactName')
+    .custom((value, { req }) => {
+      if (req.body.addressType === 'other') {
+        if (!value || !value.trim()) {
+          throw new Error('Contact name is required when address type is "other"');
+        }
+      }
+      return true;
+    }),
+  body('contactPhone')
+    .custom((value, { req }) => {
+      if (req.body.addressType === 'other') {
+        if (!value || !value.trim()) {
+          throw new Error('Contact phone is required when address type is "other"');
+        }
+        // Validate phone format if provided
+        const cleaned = value.replace(/[()\s\-\.]/g, '').replace(/(?!^)\+/g, '');
+        if (!/^\+[1-9]\d{1,14}$/.test(cleaned)) {
+          throw new Error('Contact phone must be a valid E.164 phone number (e.g., +919999999999)');
+        }
+      }
+      return true;
+    }),
+  body('paymentOption')
+    .trim()
+    .notEmpty()
+    .withMessage('Payment option is required')
+    .isIn(['payNow', 'payLater'])
+    .withMessage('Payment option must be either "payNow" or "payLater"'),
+  body('description')
     .optional()
     .trim(),
+  body('images')
+    .optional()
+    .isArray()
+    .withMessage('Images must be an array'),
+  body('images.*')
+    .optional()
+    .isURL()
+    .withMessage('Each image must be a valid URL'),
   handleValidationErrors
 ];
 

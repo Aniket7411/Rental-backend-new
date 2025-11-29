@@ -2,7 +2,8 @@ const express = require('express');
 const router = express.Router();
 const {
   getCart,
-  addToCart,
+  addRentalToCart,
+  addServiceToCart,
   updateCartItem,
   removeFromCart,
   clearCart
@@ -11,7 +12,8 @@ const { auth } = require('../middleware/auth');
 
 // All routes require authentication
 router.get('/', auth, getCart);
-router.post('/', auth, addToCart);
+router.post('/rentals', auth, addRentalToCart);
+router.post('/services', auth, addServiceToCart);
 router.patch('/:itemId', auth, updateCartItem);
 router.delete('/:itemId', auth, removeFromCart);
 router.delete('/', auth, clearCart);

@@ -8,14 +8,21 @@ exports.createServiceBooking = async (req, res, next) => {
     const { 
       serviceId, 
       userId, 
+      serviceTitle,
+      servicePrice,
       name, 
       phone, 
       email,
-      address, 
-      preferredDate,
-      preferredTime,
+      date,
+      time,
+      address,
+      addressType,
+      contactName,
+      contactPhone,
+      paymentOption,
       description,
-      images
+      images,
+      orderId
     } = req.body;
 
     // Check if service exists
@@ -23,36 +30,105 @@ exports.createServiceBooking = async (req, res, next) => {
     if (!service) {
       return res.status(404).json({
         success: false,
-        message: 'Service not found'
+        message: 'Service not found',
+        error: 'NOT_FOUND'
       });
     }
+
+    // Validate date is in the future
+    const bookingDate = new Date(date);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    
+    if (bookingDate <= today) {
+      return res.status(400).json({
+        success: false,
+        message: 'Booking date must be in the future',
+        error: 'VALIDATION_ERROR'
+      });
+    }
+
+    // Validate time slot
+    const validTimeSlots = ['10-12', '12-2', '2-4', '4-6', '6-8'];
+    if (!validTimeSlots.includes(time)) {
+      return res.status(400).json({
+        success: false,
+        message: `Invalid time slot. Valid slots are: ${validTimeSlots.join(', ')}`,
+        error: 'VALIDATION_ERROR'
+      });
+    }
+
+    // Validate contact info if addressType is other
+    if (addressType === 'other') {
+      if (!contactName || !contactName.trim()) {
+        return res.status(400).json({
+          success: false,
+          message: 'Contact name is required when address type is "other"',
+          error: 'VALIDATION_ERROR'
+        });
+      }
+      if (!contactPhone || !contactPhone.trim()) {
+        return res.status(400).json({
+          success: false,
+          message: 'Contact phone is required when address type is "other"',
+          error: 'VALIDATION_ERROR'
+        });
+      }
+    }
+
+    // Set payment status based on payment option
+    const paymentStatus = paymentOption === 'payNow' ? 'paid' : 'pending';
 
     // Create booking
     const booking = await ServiceBooking.create({
       serviceId,
-      userId, // Optional
+      userId: userId || req.user?._id || req.user?.id, // Optional, use from auth if not provided
+      serviceTitle,
+      servicePrice,
       name,
       phone,
       email, // Optional
+      date,
+      time,
       address,
-      preferredDate, // Optional
-      preferredTime, // Optional
-      description, // Optional (replaces notes)
-      images: images || [] // Optional
+      addressType,
+      contactName: addressType === 'other' ? contactName : '',
+      contactPhone: addressType === 'other' ? contactPhone : '',
+      paymentOption,
+      paymentStatus,
+      description, // Optional
+      images: images || [], // Optional
+      orderId: orderId || null // Optional, if created from order
     });
+
+    // Format time for display (e.g., "10-12" -> "10 AM - 12 PM")
+    const formatTimeSlot = (slot) => {
+      const [start, end] = slot.split('-');
+      const startHour = parseInt(start);
+      const endHour = parseInt(end);
+      const startPeriod = startHour >= 12 ? 'PM' : 'AM';
+      const endPeriod = endHour >= 12 ? 'PM' : 'AM';
+      const startDisplay = startHour > 12 ? `${startHour - 12}` : startHour === 0 ? '12' : startHour;
+      const endDisplay = endHour > 12 ? `${endHour - 12}` : endHour === 0 ? '12' : endHour;
+      return `${startDisplay} ${startPeriod} - ${endDisplay} ${endPeriod}`;
+    };
 
     // Notify admin
     const subject = 'New Service Booking';
     const messageText = `
       A new service booking has been created:
       
-      Service: ${service.title}
+      Service: ${serviceTitle || service.title}
+      Price: ₹${servicePrice}
       Customer: ${name}
       Phone: ${phone}
       Email: ${email || 'N/A'}
+      Date: ${date}
+      Time: ${formatTimeSlot(time)}
       Address: ${address}
-      Preferred Date: ${preferredDate || 'N/A'}
-      Preferred Time: ${preferredTime || 'N/A'}
+      Address Type: ${addressType === 'myself' ? 'Myself' : 'Other'}
+      ${addressType === 'other' ? `Contact Name: ${contactName}\nContact Phone: ${contactPhone}` : ''}
+      Payment Option: ${paymentOption === 'payNow' ? 'Pay Now' : 'Pay Later'}
       Description: ${description || 'N/A'}
     `;
 
@@ -64,11 +140,62 @@ exports.createServiceBooking = async (req, res, next) => {
       data: {
         _id: booking._id,
         serviceId: booking.serviceId,
-        name: booking.name,
-        phone: booking.phone,
+        serviceTitle: booking.serviceTitle,
+        servicePrice: booking.servicePrice,
+        date: booking.date,
+        time: booking.time,
+        address: booking.address,
+        addressType: booking.addressType,
+        contactName: booking.contactName,
+        contactPhone: booking.contactPhone,
+        paymentOption: booking.paymentOption,
+        paymentStatus: booking.paymentStatus,
         status: booking.status,
-        createdAt: booking.createdAt
+        bookingId: booking.bookingId,
+        createdAt: booking.createdAt,
+        updatedAt: booking.updatedAt
       }
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// Get user's own service bookings
+exports.getMyServiceBookings = async (req, res, next) => {
+  try {
+    const userId = req.user._id || req.user.id;
+    const { status, page = 1, limit = 20 } = req.query;
+    
+    // Build query - only get bookings for the authenticated user
+    let query = { userId };
+    if (status) {
+      query.status = status;
+    }
+
+    // Calculate pagination
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+    
+    // Get bookings with pagination
+    const bookings = await ServiceBooking.find(query)
+      .populate('serviceId', 'title description price')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(parseInt(limit));
+
+    // Get total count
+    const total = await ServiceBooking.countDocuments(query);
+
+    res.status(200).json({
+      success: true,
+      data: bookings.map(booking => ({
+        ...booking.toObject(),
+        bookingId: booking.bookingId,
+        paymentStatus: booking.paymentStatus
+      })),
+      total,
+      page: parseInt(page),
+      limit: parseInt(limit)
     });
   } catch (error) {
     next(error);
@@ -92,6 +219,7 @@ exports.getAllServiceBookings = async (req, res, next) => {
     // Get bookings with pagination
     const bookings = await ServiceBooking.find(query)
       .populate('serviceId', 'title')
+      .populate('userId', 'name email phone')
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(parseInt(limit));
@@ -111,16 +239,120 @@ exports.getAllServiceBookings = async (req, res, next) => {
   }
 };
 
-// Update service booking status (Admin)
+// Update service booking (Admin or User - can update time, date, or status)
+exports.updateServiceBooking = async (req, res, next) => {
+  try {
+    const { time, date, status } = req.body;
+    const bookingId = req.params.id;
+
+    const booking = await ServiceBooking.findById(bookingId);
+    if (!booking) {
+      return res.status(404).json({
+        success: false,
+        message: 'Service booking not found',
+        error: 'NOT_FOUND'
+      });
+    }
+
+    // Check authorization - users can only update their own bookings
+    const userId = req.user?._id || req.user?.id;
+    if (userId && booking.userId && booking.userId.toString() !== userId.toString() && req.user?.role !== 'admin') {
+      return res.status(403).json({
+        success: false,
+        message: 'Not authorized to update this booking',
+        error: 'FORBIDDEN'
+      });
+    }
+
+    const updateData = {};
+
+    // Validate and update time slot if provided
+    if (time !== undefined) {
+      const validTimeSlots = ['10-12', '12-2', '2-4', '4-6', '6-8'];
+      if (!validTimeSlots.includes(time)) {
+        return res.status(400).json({
+          success: false,
+          message: `Invalid time slot. Valid slots are: ${validTimeSlots.join(', ')}`,
+          error: 'VALIDATION_ERROR'
+        });
+      }
+      updateData.time = time;
+    }
+
+    // Validate and update date if provided
+    if (date !== undefined) {
+      const bookingDate = new Date(date);
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      
+      if (bookingDate <= today) {
+        return res.status(400).json({
+          success: false,
+          message: 'Booking date must be in the future',
+          error: 'VALIDATION_ERROR'
+        });
+      }
+      
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+        return res.status(400).json({
+          success: false,
+          message: 'Date must be in YYYY-MM-DD format',
+          error: 'VALIDATION_ERROR'
+        });
+      }
+      updateData.date = date;
+    }
+
+    // Validate and update status if provided (admin only)
+    if (status !== undefined) {
+      if (req.user?.role !== 'admin') {
+        return res.status(403).json({
+          success: false,
+          message: 'Only admins can update booking status',
+          error: 'FORBIDDEN'
+        });
+      }
+
+      const allowedStatuses = ['New', 'Contacted', 'In-Progress', 'Resolved', 'Rejected', 'Cancelled'];
+      if (!allowedStatuses.includes(status)) {
+        return res.status(400).json({
+          success: false,
+          message: `Invalid status. Must be one of: ${allowedStatuses.join(', ')}`,
+          error: 'VALIDATION_ERROR'
+        });
+      }
+      updateData.status = status;
+    }
+
+    // Update booking
+    const updatedBooking = await ServiceBooking.findByIdAndUpdate(
+      bookingId,
+      updateData,
+      { new: true, runValidators: true }
+    )
+      .populate('serviceId', 'title');
+
+    res.status(200).json({
+      success: true,
+      message: 'Booking updated successfully',
+      data: updatedBooking
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// Update service booking status (Admin) - kept for backward compatibility
 exports.updateServiceBookingStatus = async (req, res, next) => {
   try {
     const { status } = req.body;
 
-    const allowedStatuses = ['New', 'Contacted', 'In-Progress', 'Resolved', 'Rejected'];
+    const allowedStatuses = ['New', 'Contacted', 'In-Progress', 'Resolved', 'Rejected', 'Cancelled'];
     if (!allowedStatuses.includes(status)) {
       return res.status(400).json({
         success: false,
-        message: 'Invalid status. Must be one of: New, Contacted, In-Progress, Resolved, Rejected'
+        message: `Invalid status. Must be one of: ${allowedStatuses.join(', ')}`,
+        error: 'VALIDATION_ERROR'
       });
     }
 
@@ -128,19 +360,25 @@ exports.updateServiceBookingStatus = async (req, res, next) => {
       req.params.id,
       { status },
       { new: true, runValidators: true }
-    );
+    )
+      .populate('serviceId', 'title');
 
     if (!booking) {
       return res.status(404).json({
         success: false,
-        message: 'Service booking not found'
+        message: 'Service booking not found',
+        error: 'NOT_FOUND'
       });
     }
 
     res.status(200).json({
       success: true,
       message: 'Lead status updated',
-      data: booking
+      data: {
+        _id: booking._id,
+        status: booking.status,
+        updatedAt: booking.updatedAt
+      }
     });
   } catch (error) {
     next(error);

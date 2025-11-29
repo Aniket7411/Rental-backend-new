@@ -30,8 +30,8 @@ const paymentSchema = new mongoose.Schema({
   },
   paymentMethod: {
     type: String,
-    enum: ['full', 'advance'],
-    required: true
+    enum: ['razorpay', 'stripe', 'paypal', 'full', 'advance'],
+    default: 'razorpay'
   },
   paymentGateway: {
     type: String,
@@ -60,7 +60,7 @@ const paymentSchema = new mongoose.Schema({
 });
 
 // Generate payment ID before saving
-paymentSchema.pre('save', async function(next) {
+paymentSchema.pre('save', async function (next) {
   if (!this.paymentId) {
     const timestamp = Date.now();
     const random = Math.floor(Math.random() * 10000);

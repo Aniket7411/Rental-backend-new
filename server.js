@@ -85,8 +85,9 @@ app.use('/api/auth', authRoutes); // Unified authentication routes
 app.use('/api/users', userRoutes);
 app.use('/api/products', productRoutes);
 app.use('/api/users/cart', cartRoutes);
-app.use('/api/users/wishlist', wishlistRoutes);
+app.use('/api/wishlist', wishlistRoutes);
 app.use('/api/users/orders', orderRoutes);
+app.use('/api/orders', orderRoutes);
 app.use('/api/payments', paymentRoutes);
 app.use('/api/users/service-requests', serviceRequestRoutes);
 app.use('/api/tickets', ticketRoutes);

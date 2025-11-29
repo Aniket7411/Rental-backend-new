@@ -5,7 +5,7 @@ const Ticket = require('../models/Ticket');
 // @access  Private (Admin)
 exports.getAllTickets = async (req, res, next) => {
   try {
-    const { status, priority, category, page = 1, limit = 10 } = req.query;
+    const { status, priority, category, search, page = 1, limit = 10 } = req.query;
 
     // Build filter object
     const filter = {};
@@ -13,13 +13,27 @@ exports.getAllTickets = async (req, res, next) => {
     if (priority) filter.priority = priority;
     if (category) filter.category = category;
 
+    // Search functionality (search in subject and description)
+    if (search) {
+      filter.$or = [
+        { subject: { $regex: search, $options: 'i' } },
+        { description: { $regex: search, $options: 'i' } }
+      ];
+    }
+
     // Pagination
     const pageNum = parseInt(page);
     const limitNum = parseInt(limit);
     const skip = (pageNum - 1) * limitNum;
 
     const tickets = await Ticket.find(filter)
-      .populate('user', 'name email')
+      .populate('user', 'name email phone')
+      .populate([
+        { path: 'relatedOrder', select: 'orderId status totalAmount' },
+        { path: 'relatedServiceBooking', select: 'serviceId name phone address status' },
+        { path: 'relatedServiceRequest', select: 'serviceType productType status' },
+        { path: 'relatedRentalInquiry', select: 'productCategory status' }
+      ])
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limitNum);
@@ -59,7 +73,14 @@ exports.updateTicketStatus = async (req, res, next) => {
       ticketId,
       { status, updatedAt: Date.now() },
       { new: true, runValidators: true }
-    );
+    )
+      .populate('user', 'name email')
+      .populate([
+        { path: 'relatedOrder', select: 'orderId status totalAmount' },
+        { path: 'relatedServiceBooking', select: 'serviceId name phone address status' },
+        { path: 'relatedServiceRequest', select: 'serviceType productType status' },
+        { path: 'relatedRentalInquiry', select: 'productCategory status' }
+      ]);
 
     if (!ticket) {
       return res.status(404).json({
@@ -103,7 +124,14 @@ exports.addTicketRemark = async (req, res, next) => {
         updatedAt: Date.now()
       },
       { new: true, runValidators: true }
-    );
+    )
+      .populate('user', 'name email')
+      .populate([
+        { path: 'relatedOrder', select: 'orderId status totalAmount' },
+        { path: 'relatedServiceBooking', select: 'serviceId name phone address status' },
+        { path: 'relatedServiceRequest', select: 'serviceType productType status' },
+        { path: 'relatedRentalInquiry', select: 'productCategory status' }
+      ]);
 
     if (!ticket) {
       return res.status(404).json({
