@@ -11,6 +11,7 @@ exports.getAllACs = async (req, res, next) => {
       brand,
       capacity,
       type,
+      condition,
       location,
       duration
     } = req.query;
@@ -36,12 +37,31 @@ exports.getAllACs = async (req, res, next) => {
     if (brand) {
       query.brand = { $regex: brand, $options: 'i' };
     }
+    
+    // Capacity filter - support comma-separated values with OR logic
     if (capacity) {
-      query.capacity = capacity;
+      const capacityValues = capacity.split(',').map(c => c.trim()).filter(c => c);
+      if (capacityValues.length > 0) {
+        query.capacity = capacityValues.length === 1 ? capacityValues[0] : { $in: capacityValues };
+      }
     }
+    
+    // Type filter - support comma-separated values with OR logic
     if (type) {
-      query.type = type;
+      const typeValues = type.split(',').map(t => t.trim()).filter(t => t);
+      if (typeValues.length > 0) {
+        query.type = typeValues.length === 1 ? typeValues[0] : { $in: typeValues };
+      }
     }
+    
+    // Condition filter - support comma-separated values with OR logic
+    if (condition) {
+      const conditionValues = condition.split(',').map(c => c.trim()).filter(c => c);
+      if (conditionValues.length > 0) {
+        query.condition = conditionValues.length === 1 ? conditionValues[0] : { $in: conditionValues };
+      }
+    }
+    
     if (location) {
       query.location = { $regex: location, $options: 'i' };
     }
