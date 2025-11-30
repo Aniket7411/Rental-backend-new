@@ -25,7 +25,13 @@ const orderSchema = new mongoose.Schema({
       ref: 'Product'
     },
     product: {
-      type: Object // Product snapshot
+      type: Object // Product snapshot (backward compatibility)
+    },
+    productDetails: {
+      type: Object // Complete product details from frontend
+    },
+    deliveryInfo: {
+      type: Object // Delivery information for rental items
     },
     quantity: {
       type: Number,
@@ -47,15 +53,13 @@ const orderSchema = new mongoose.Schema({
       ref: 'Service'
     },
     service: {
-      type: Object // Service snapshot
+      type: Object // Service snapshot (backward compatibility)
+    },
+    serviceDetails: {
+      type: Object // Complete service details from frontend
     },
     bookingDetails: {
-      date: String,
-      time: String,
-      address: String,
-      addressType: String,
-      contactName: String,
-      contactPhone: String
+      type: Object // Complete booking details for service items
     }
   }],
   total: {
@@ -89,6 +93,19 @@ const orderSchema = new mongoose.Schema({
     default: 'pending',
     index: true
   },
+  customerInfo: {
+    type: Object // Complete customer information
+  },
+  deliveryAddresses: [{
+    type: Object // Array of delivery addresses
+  }],
+  notes: {
+    type: String,
+    trim: true
+  },
+  orderDate: {
+    type: Date
+  },
   shippingAddress: {
     type: String,
     trim: true
@@ -102,12 +119,24 @@ const orderSchema = new mongoose.Schema({
     transactionId: String,
     gateway: String,
     paidAt: Date
+  },
+  cancellationReason: {
+    type: String,
+    trim: true
+  },
+  cancelledAt: {
+    type: Date
+  },
+  cancelledBy: {
+    type: String,
+    enum: ['user', 'admin']
   }
 }, {
   timestamps: true
 });
 
-// Generate order ID before saving
+// Order ID is provided by frontend, no auto-generation needed
+// If orderId is not provided (backward compatibility), generate it
 orderSchema.pre('save', async function (next) {
   if (!this.orderId) {
     const year = new Date().getFullYear();

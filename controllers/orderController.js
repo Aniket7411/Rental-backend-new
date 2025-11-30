@@ -1,3 +1,4 @@
+const mongoose = require('mongoose');
 const Order = require('../models/Order');
 const Product = require('../models/Product');
 const Service = require('../models/Service');
@@ -73,13 +74,36 @@ exports.getUserOrders = async (req, res, next) => {
 exports.getOrderById = async (req, res, next) => {
   try {
     const userId = req.user._id || req.user.id;
-    const order = await Order.findOne({
-      _id: req.params.orderId,
-      userId
-    })
-      .populate('items.productId')
-      .populate('items.serviceId')
-      .populate('userId', 'name email phone');
+    const userRole = req.user.role;
+    const orderIdentifier = req.params.orderId;
+
+    // Build base query - admins can view any order, users can only view their own
+    const userQuery = userRole !== 'admin' ? { userId } : {};
+
+    // Check if orderIdentifier is a valid MongoDB ObjectId
+    let order = null;
+
+    if (mongoose.Types.ObjectId.isValid(orderIdentifier)) {
+      // Try finding by MongoDB _id
+      order = await Order.findOne({
+        _id: orderIdentifier,
+        ...userQuery
+      })
+        .populate('items.productId')
+        .populate('items.serviceId')
+        .populate('userId', 'name email phone');
+    }
+
+    // If not found, try finding by orderId string (e.g., "ORD-2025-295")
+    if (!order) {
+      order = await Order.findOne({
+        orderId: orderIdentifier,
+        ...userQuery
+      })
+        .populate('items.productId')
+        .populate('items.serviceId')
+        .populate('userId', 'name email phone');
+    }
 
     if (!order) {
       return res.status(404).json({
@@ -102,16 +126,47 @@ exports.getOrderById = async (req, res, next) => {
 exports.createOrder = async (req, res, next) => {
   try {
     const {
+      orderId,
       items,
       paymentOption,
       paymentStatus,
       total,
       discount,
       finalTotal,
+      customerInfo,
+      deliveryAddresses,
+      notes,
+      orderDate,
       shippingAddress,
       billingAddress
     } = req.body;
-    const userId = req.user._id || req.user.id;
+
+    // Use customerInfo.userId if provided, otherwise use authenticated user
+    let userId;
+    if (customerInfo && customerInfo.userId) {
+      // Validate that the customerInfo.userId matches the authenticated user
+      const authenticatedUserId = (req.user._id || req.user.id).toString();
+      if (customerInfo.userId !== authenticatedUserId && req.user.role !== 'admin') {
+        return res.status(403).json({
+          success: false,
+          message: 'Customer info userId must match authenticated user',
+          error: 'FORBIDDEN'
+        });
+      }
+      userId = customerInfo.userId;
+    } else {
+      userId = req.user._id || req.user.id;
+    }
+
+    // Validate orderId if provided (frontend should provide it)
+    // If not provided, it will be auto-generated (backward compatibility)
+    if (orderId && typeof orderId !== 'string') {
+      return res.status(400).json({
+        success: false,
+        message: 'orderId must be a string',
+        error: 'VALIDATION_ERROR'
+      });
+    }
 
     if (!items || !Array.isArray(items) || items.length === 0) {
       return res.status(400).json({
@@ -153,14 +208,20 @@ exports.createOrder = async (req, res, next) => {
           });
         }
 
-        // Validate duration (default to 3 if not provided)
-        const duration = item.duration || 3;
-        if (![3, 6, 9, 11].includes(duration)) {
-          return res.status(400).json({
-            success: false,
-            message: 'Duration must be 3, 6, 9, or 11 months',
-            error: 'VALIDATION_ERROR'
-          });
+        // Validate duration - MUST be a number (3, 6, 9, or 11)
+        let duration = item.duration;
+        if (duration === undefined || duration === null) {
+          duration = 3; // Default to 3 months
+        } else {
+          // Convert to number if string is provided
+          duration = typeof duration === 'string' ? parseInt(duration, 10) : duration;
+          if (isNaN(duration) || ![3, 6, 9, 11].includes(duration)) {
+            return res.status(400).json({
+              success: false,
+              message: 'Duration must be a number: 3, 6, 9, or 11 months',
+              error: 'VALIDATION_ERROR'
+            });
+          }
         }
 
         const product = await Product.findById(item.productId);
@@ -180,7 +241,7 @@ exports.createOrder = async (req, res, next) => {
           });
         }
 
-        // Create product snapshot
+        // Create product snapshot (for backward compatibility)
         const productSnapshot = {
           _id: product._id,
           category: product.category,
@@ -193,10 +254,16 @@ exports.createOrder = async (req, res, next) => {
           price: product.price
         };
 
+        // Use productDetails from frontend if provided, otherwise use snapshot
+        const productDetails = item.productDetails || productSnapshot;
+        const deliveryInfo = item.deliveryInfo || {};
+
         processedItems.push({
           type: 'rental',
           productId: product._id,
-          product: productSnapshot,
+          product: productSnapshot, // Keep for backward compatibility
+          productDetails: productDetails,
+          deliveryInfo: deliveryInfo,
           quantity: item.quantity,
           price: item.price,
           duration: duration
@@ -222,7 +289,7 @@ exports.createOrder = async (req, res, next) => {
           });
         }
 
-        // Create service snapshot
+        // Create service snapshot (for backward compatibility)
         const serviceSnapshot = {
           _id: service._id,
           title: service.title,
@@ -231,10 +298,14 @@ exports.createOrder = async (req, res, next) => {
           image: service.image
         };
 
+        // Use serviceDetails from frontend if provided, otherwise use snapshot
+        const serviceDetails = item.serviceDetails || serviceSnapshot;
+
         processedItems.push({
           type: 'service',
           serviceId: service._id,
-          service: serviceSnapshot,
+          service: serviceSnapshot, // Keep for backward compatibility
+          serviceDetails: serviceDetails,
           quantity: item.quantity || 1, // Default to 1 if not provided
           bookingDetails: item.bookingDetails,
           price: item.price
@@ -245,6 +316,7 @@ exports.createOrder = async (req, res, next) => {
         // Store service booking details to create after order
         serviceBookingsToCreate.push({
           serviceId: service._id,
+          service: service, // Store full service object for reference
           serviceTitle: service.title,
           servicePrice: service.price,
           bookingDetails: item.bookingDetails
@@ -272,13 +344,25 @@ exports.createOrder = async (req, res, next) => {
 
     // Set payment status based on payment option
     const finalPaymentStatus = paymentStatus || (paymentOption === 'payNow' ? 'paid' : 'pending');
-    
+
     // Set order status based on payment status
     // If payNow and payment is successful, status should be "confirmed", otherwise "pending"
     const orderStatus = (paymentOption === 'payNow' && finalPaymentStatus === 'paid') ? 'confirmed' : 'pending';
 
-    // Create order
-    const order = await Order.create({
+    // Validate customerInfo if provided
+    if (customerInfo) {
+      if (!customerInfo.userId || !customerInfo.name || !customerInfo.email || !customerInfo.phone) {
+        return res.status(400).json({
+          success: false,
+          message: 'customerInfo must include userId, name, email, and phone',
+          error: 'VALIDATION_ERROR'
+        });
+      }
+    }
+
+    // Create order with new structure
+    const orderData = {
+      orderId: orderId, // Frontend provides orderId
       userId,
       items: processedItems,
       total: orderTotal,
@@ -287,44 +371,99 @@ exports.createOrder = async (req, res, next) => {
       paymentOption,
       paymentStatus: finalPaymentStatus,
       status: orderStatus,
+      customerInfo: customerInfo || null,
+      deliveryAddresses: deliveryAddresses || [],
+      notes: notes || '',
+      orderDate: orderDate ? new Date(orderDate) : new Date(),
       shippingAddress: shippingAddress || '',
       billingAddress: billingAddress || ''
-    });
+    };
 
-    // Create service bookings for service items
-    const user = req.user;
+    const order = await Order.create(orderData);
+
+    // ============================================
+    // SERVICE REQUEST FLOW: Auto-create Service Bookings
+    // ============================================
+    // According to SERVICE_REQUEST_FLOW.md:
+    // When an order contains service items, automatically create ServiceBooking documents
+    // for each service item. Service bookings are created from item.bookingDetails.
+    // This ensures service bookings go through the proper checkout process.
+    // ============================================
+
+    // Use customerInfo if available, otherwise use req.user
+    const customerName = customerInfo?.name || req.user?.name;
+    const customerPhone = customerInfo?.phone || req.user?.phone;
+    const customerEmail = customerInfo?.email || req.user?.email;
+
     for (const bookingData of serviceBookingsToCreate) {
-      const { serviceId, serviceTitle, servicePrice, bookingDetails } = bookingData;
-      
+      const { serviceId, service, serviceTitle, servicePrice, bookingDetails } = bookingData;
+
+      // Validate bookingDetails has required fields
+      if (!bookingDetails) {
+        console.warn(`Skipping service booking creation for service ${serviceId}: missing bookingDetails`);
+        continue;
+      }
+
       // Set payment status for service booking
       const bookingPaymentOption = bookingDetails.paymentOption || paymentOption;
       const bookingPaymentStatus = bookingPaymentOption === 'payNow' ? 'paid' : 'pending';
-      
-      await ServiceBooking.create({
+
+      // Extract booking details according to SERVICE_REQUEST_FLOW.md
+      // Map preferredDate/preferredTime to date/time (model uses date/time internally)
+      const bookingDate = bookingDetails.preferredDate || bookingDetails.date;
+      const bookingTime = bookingDetails.preferredTime || bookingDetails.time;
+
+      // Use notes from bookingDetails (API uses notes, model uses description)
+      const bookingNotes = bookingDetails.notes || bookingDetails.description || '';
+
+      // Determine name and phone - prefer bookingDetails, fallback to customerInfo/user
+      const bookingName = bookingDetails.name || bookingDetails.contactName || customerName;
+      const bookingPhone = bookingDetails.phone || bookingDetails.contactPhone || customerPhone;
+
+      // Create service booking document as per SERVICE_REQUEST_FLOW.md
+      // Structure matches the flow document requirements:
+      // - orderId: Links booking to order (required)
+      // - userId: From customerInfo.userId
+      // - All booking details from item.bookingDetails
+      // - preferredDate/preferredTime mapped to date/time
+      // - notes mapped to description
+      // - Include address fields: nearLandmark, pincode, alternateNumber per USER.md
+      const serviceBooking = await ServiceBooking.create({
         serviceId,
-        userId,
-        serviceTitle,
-        servicePrice,
-        name: user.name,
-        phone: user.phone,
-        email: user.email,
-        date: bookingDetails.date,
-        time: bookingDetails.time,
+        orderId: order._id, // Link to order (required per SERVICE_REQUEST_FLOW.md)
+        userId: userId, // From customerInfo.userId
+        serviceTitle: serviceTitle || (service ? service.title : ''),
+        servicePrice: servicePrice || (service ? service.price : 0),
+        name: bookingName,
+        phone: bookingPhone,
+        email: customerEmail || bookingDetails.email || '',
+        date: bookingDate, // Map from preferredDate (API uses preferredDate, model uses date)
+        time: bookingTime, // Map from preferredTime (API uses preferredTime, model uses time)
         address: bookingDetails.address,
-        addressType: bookingDetails.addressType,
-        contactName: bookingDetails.contactName || '',
-        contactPhone: bookingDetails.contactPhone || '',
+        nearLandmark: bookingDetails.nearLandmark || '',
+        pincode: bookingDetails.pincode || '',
+        alternateNumber: bookingDetails.alternateNumber || '',
+        addressType: bookingDetails.addressType || 'myself',
+        contactName: bookingDetails.contactName || (bookingDetails.addressType === 'other' ? bookingName : ''),
+        contactPhone: bookingDetails.contactPhone || (bookingDetails.addressType === 'other' ? bookingPhone : ''),
+        description: bookingNotes, // Map from notes (API uses notes, model uses description)
         paymentOption: bookingPaymentOption,
         paymentStatus: bookingPaymentStatus,
-        status: 'New',
-        orderId: order._id
+        status: 'New', // Default status per SERVICE_REQUEST_FLOW.md
+        images: bookingDetails.images || [] // Optional images
       });
+
+      // Log service booking creation for debugging
+      console.log(`Service booking created: ${serviceBooking._id} for order ${order.orderId}`);
     }
 
-    // Update product status to Rented Out for rental items
-    for (const item of items) {
-      if (item.type === 'rental' && item.productId) {
-        await Product.findByIdAndUpdate(item.productId, { status: 'Rented Out' });
+    // Update product status to Rented Out for rental items ONLY if order is confirmed (payment successful)
+    // For Pay Later orders, product remains Available until payment is confirmed
+    if (orderStatus === 'confirmed' && finalPaymentStatus === 'paid') {
+      for (const item of items) {
+        if (item.type === 'rental' && item.productId) {
+          await Product.findByIdAndUpdate(item.productId, { status: 'Rented Out' });
+        }
       }
     }
 
@@ -371,34 +510,28 @@ exports.createOrder = async (req, res, next) => {
 // Get All Orders (Admin)
 exports.getAllOrders = async (req, res, next) => {
   try {
-    const { status, paymentStatus, page = 1, limit = 10 } = req.query;
+    const { status, paymentStatus } = req.query;
 
+    // Build query with filters
     const query = {};
-    if (status) {
+    if (status && status !== 'all') {
       query.status = status;
     }
-    if (paymentStatus) {
+    if (paymentStatus && paymentStatus !== 'all') {
       query.paymentStatus = paymentStatus;
     }
 
-    const skip = (parseInt(page) - 1) * parseInt(limit);
-
+    // Get all orders (no pagination for admin panel - frontend handles it)
     const orders = await Order.find(query)
       .populate('userId', 'name email phone')
       .populate('items.productId')
       .populate('items.serviceId')
       .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(parseInt(limit));
-
-    const total = await Order.countDocuments(query);
+      .lean(); // Use lean() for better performance
 
     res.json({
       success: true,
-      data: orders,
-      total,
-      page: parseInt(page),
-      limit: parseInt(limit)
+      data: orders
     });
   } catch (error) {
     next(error);
@@ -411,6 +544,14 @@ exports.updateOrderStatus = async (req, res, next) => {
     const { status } = req.body;
     const orderId = req.params.orderId || req.params.id;
 
+    if (!status) {
+      return res.status(400).json({
+        success: false,
+        message: 'Status is required',
+        error: 'VALIDATION_ERROR'
+      });
+    }
+
     const validStatuses = ['pending', 'confirmed', 'processing', 'shipped', 'delivered', 'completed', 'cancelled'];
     if (!validStatuses.includes(status)) {
       return res.status(400).json({
@@ -420,8 +561,24 @@ exports.updateOrderStatus = async (req, res, next) => {
       });
     }
 
+    // Find order by MongoDB _id or orderId string
+    let oldOrder = await Order.findById(orderId);
+    if (!oldOrder) {
+      // Try finding by orderId string (e.g., "ORD-2025-295")
+      oldOrder = await Order.findOne({ orderId: orderId });
+    }
+
+    if (!oldOrder) {
+      return res.status(404).json({
+        success: false,
+        message: 'Order not found',
+        error: 'NOT_FOUND'
+      });
+    }
+
+    // Update order using the _id from the found order
     const order = await Order.findByIdAndUpdate(
-      orderId,
+      oldOrder._id,
       { status },
       { new: true, runValidators: true }
     )
@@ -429,12 +586,28 @@ exports.updateOrderStatus = async (req, res, next) => {
       .populate('items.productId')
       .populate('items.serviceId');
 
-    if (!order) {
-      return res.status(404).json({
-        success: false,
-        message: 'Order not found',
-        error: 'NOT_FOUND'
-      });
+    // Update product status when order is confirmed
+    // Only update if status changed to 'confirmed' and payment is paid
+    if (status === 'confirmed' && oldOrder.paymentStatus === 'paid') {
+      for (const item of order.items) {
+        if (item.type === 'rental' && item.productId) {
+          await Product.findByIdAndUpdate(item.productId, { status: 'Rented Out' });
+        }
+      }
+    }
+
+    // If order is cancelled or status changes away from confirmed, make products available again
+    if (status === 'cancelled' && oldOrder.status !== 'cancelled') {
+      for (const item of order.items) {
+        if (item.type === 'rental' && item.productId) {
+          await Product.findByIdAndUpdate(item.productId, { status: 'Available' });
+        }
+      }
+      // Cancel related service bookings
+      await ServiceBooking.updateMany(
+        { orderId: order._id },
+        { status: 'Cancelled' }
+      );
     }
 
     res.json({
@@ -451,9 +624,38 @@ exports.updateOrderStatus = async (req, res, next) => {
 exports.cancelOrder = async (req, res, next) => {
   try {
     const userId = req.user._id || req.user.id;
+    const userRole = req.user.role;
     const orderId = req.params.orderId;
+    const { cancellationReason } = req.body;
 
-    const order = await Order.findOne({ _id: orderId, userId });
+    // Validate cancellation reason is provided
+    if (!cancellationReason || typeof cancellationReason !== 'string' || cancellationReason.trim() === '') {
+      return res.status(400).json({
+        success: false,
+        message: 'Cancellation reason is required',
+        error: 'VALIDATION_ERROR'
+      });
+    }
+
+    // Build query - admins can cancel any order, users can only cancel their own
+    // Check if orderId is a valid MongoDB ObjectId
+    let order = null;
+
+    if (mongoose.Types.ObjectId.isValid(orderId)) {
+      // Try finding by MongoDB _id
+      const orderQuery = userRole === 'admin' 
+        ? { _id: orderId } 
+        : { _id: orderId, userId };
+      order = await Order.findOne(orderQuery);
+    }
+
+    // If not found, try finding by orderId string (e.g., "ORD-2025-295")
+    if (!order) {
+      const orderIdQuery = userRole === 'admin'
+        ? { orderId: orderId }
+        : { orderId: orderId, userId };
+      order = await Order.findOne(orderIdQuery);
+    }
 
     if (!order) {
       return res.status(404).json({
@@ -463,6 +665,7 @@ exports.cancelOrder = async (req, res, next) => {
       });
     }
 
+    // Check if order can be cancelled
     if (order.status === 'cancelled') {
       return res.status(400).json({
         success: false,
@@ -471,16 +674,22 @@ exports.cancelOrder = async (req, res, next) => {
       });
     }
 
-    if (order.status === 'completed') {
+    if (order.status === 'completed' || order.status === 'delivered') {
       return res.status(400).json({
         success: false,
-        message: 'Cannot cancel a completed order',
+        message: `Cannot cancel a ${order.status} order`,
         error: 'VALIDATION_ERROR'
       });
     }
 
-    // Update order status
+    // Determine who is cancelling
+    const cancelledBy = userRole === 'admin' ? 'admin' : 'user';
+
+    // Update order with cancellation details
     order.status = 'cancelled';
+    order.cancellationReason = cancellationReason.trim();
+    order.cancelledAt = new Date();
+    order.cancelledBy = cancelledBy;
     await order.save();
 
     // Update product status back to Available for rental items
@@ -496,9 +705,34 @@ exports.cancelOrder = async (req, res, next) => {
       { status: 'Cancelled' }
     );
 
+    // Populate order for notification and response
+    await order.populate([
+      { path: 'items.productId' },
+      { path: 'items.serviceId' },
+      { path: 'userId', select: 'name email phone' }
+    ]);
+
+    // Notify admin about order cancellation
+    const orderUser = order.userId;
+    const subject = `Order ${order.orderId} Cancelled - ${cancelledBy === 'admin' ? 'By Admin' : 'By User'}`;
+    const messageText = `
+      An order has been cancelled:
+      
+      Order ID: ${order.orderId}
+      Customer: ${orderUser?.name || 'N/A'} (${orderUser?.email || 'N/A'})
+      Cancelled By: ${cancelledBy === 'admin' ? 'Admin' : 'User'}
+      Cancellation Reason: ${cancellationReason}
+      Cancelled At: ${order.cancelledAt.toLocaleString()}
+      Order Total: ₹${order.total}
+      
+      Please check the admin panel for details.
+    `;
+
+    await notifyAdmin(subject, messageText);
+
     res.json({
       success: true,
-      message: 'Order cancelled',
+      message: 'Order cancelled successfully',
       data: order
     });
   } catch (error) {

@@ -43,6 +43,11 @@ const {
   updateTicketStatus,
   addTicketRemark
 } = require('../controllers/adminTicketController');
+const {
+  createFAQ,
+  updateFAQ,
+  deleteFAQ
+} = require('../controllers/faqController');
 const { validateAdminLogin, validateAC, validateService } = require('../middleware/validation');
 
 // Admin login (public)
@@ -56,7 +61,7 @@ router.delete('/acs/:id', auth, deleteAC);
 
 // Admin rental inquiries routes
 router.get('/rental-inquiries', auth, getAllRentalInquiries);
-router.patch('/rental-inquiries/:id', auth, updateInquiryStatus);
+router.patch('/rental-inquiries/:inquiryId', auth, updateInquiryStatus);
 
 // Admin vendor requests routes
 router.get('/vendor-requests', auth, getAllVendorRequests);
@@ -68,7 +73,7 @@ router.delete('/services/:id', auth, deleteService);
 
 // Admin service bookings routes
 router.get('/service-bookings', adminAuth, getAllServiceBookings);
-router.patch('/service-bookings/:id', adminAuth, updateServiceBookingStatus);
+router.patch('/service-bookings/:leadId', adminAuth, updateServiceBookingStatus);
 
 // Admin product routes (from BACKEND_UPDATES.md)
 router.get('/products', adminAuth, getProducts);
@@ -78,7 +83,7 @@ router.delete('/products/:id', adminAuth, deleteProduct);
 
 // Admin order routes
 router.get('/orders', adminAuth, getAllOrders);
-router.patch('/orders/:id', adminAuth, updateOrderStatus);
+router.patch('/orders/:orderId/status', adminAuth, updateOrderStatus);
 
 // Admin service request routes (from BACKEND_UPDATES.md)
 router.get('/service-requests', adminAuth, getAllServiceRequests);
@@ -88,6 +93,11 @@ router.patch('/service-requests/:requestId', adminAuth, updateServiceRequestStat
 router.get('/tickets', adminAuth, getAllTickets);
 router.patch('/tickets/:ticketId/status', adminAuth, updateTicketStatus);
 router.post('/tickets/:ticketId/remarks', adminAuth, addTicketRemark);
+
+// Admin FAQ routes
+router.post('/faqs', adminAuth, createFAQ);
+router.patch('/faqs/:id', adminAuth, updateFAQ);
+router.delete('/faqs/:id', adminAuth, deleteFAQ);
 
 module.exports = router;
 

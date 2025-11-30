@@ -5,25 +5,36 @@ const { notifyAdmin } = require('../utils/notifications');
 // Create service booking (Public)
 exports.createServiceBooking = async (req, res, next) => {
   try {
-    const { 
-      serviceId, 
-      userId, 
+    const {
+      serviceId,
+      userId,
       serviceTitle,
       servicePrice,
-      name, 
-      phone, 
+      name,
+      phone,
       email,
       date,
       time,
+      preferredDate, // API uses preferredDate
+      preferredTime, // API uses preferredTime
       address,
+      nearLandmark, // Per USER.md
+      pincode, // Per USER.md
+      alternateNumber, // Per USER.md
       addressType,
       contactName,
       contactPhone,
       paymentOption,
       description,
+      notes, // API uses notes instead of description
       images,
       orderId
     } = req.body;
+
+    // Map preferredDate/preferredTime to date/time for backward compatibility
+    const finalDate = preferredDate || date;
+    const finalTime = preferredTime || time;
+    const finalDescription = notes || description;
 
     // Check if service exists
     const service = await Service.findById(serviceId);
@@ -36,10 +47,10 @@ exports.createServiceBooking = async (req, res, next) => {
     }
 
     // Validate date is in the future
-    const bookingDate = new Date(date);
+    const bookingDate = new Date(finalDate);
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-    
+
     if (bookingDate <= today) {
       return res.status(400).json({
         success: false,
@@ -50,7 +61,7 @@ exports.createServiceBooking = async (req, res, next) => {
 
     // Validate time slot
     const validTimeSlots = ['10-12', '12-2', '2-4', '4-6', '6-8'];
-    if (!validTimeSlots.includes(time)) {
+    if (!validTimeSlots.includes(finalTime)) {
       return res.status(400).json({
         success: false,
         message: `Invalid time slot. Valid slots are: ${validTimeSlots.join(', ')}`,
@@ -88,15 +99,18 @@ exports.createServiceBooking = async (req, res, next) => {
       name,
       phone,
       email, // Optional
-      date,
-      time,
+      date: finalDate,
+      time: finalTime,
       address,
+      nearLandmark: nearLandmark || '', // Per USER.md
+      pincode: pincode || '', // Per USER.md
+      alternateNumber: alternateNumber || '', // Per USER.md
       addressType,
       contactName: addressType === 'other' ? contactName : '',
       contactPhone: addressType === 'other' ? contactPhone : '',
       paymentOption,
       paymentStatus,
-      description, // Optional
+      description: finalDescription, // Optional
       images: images || [], // Optional
       orderId: orderId || null // Optional, if created from order
     });
@@ -123,13 +137,13 @@ exports.createServiceBooking = async (req, res, next) => {
       Customer: ${name}
       Phone: ${phone}
       Email: ${email || 'N/A'}
-      Date: ${date}
-      Time: ${formatTimeSlot(time)}
+      Date: ${finalDate}
+      Time: ${formatTimeSlot(finalTime)}
       Address: ${address}
       Address Type: ${addressType === 'myself' ? 'Myself' : 'Other'}
       ${addressType === 'other' ? `Contact Name: ${contactName}\nContact Phone: ${contactPhone}` : ''}
       Payment Option: ${paymentOption === 'payNow' ? 'Pay Now' : 'Pay Later'}
-      Description: ${description || 'N/A'}
+      Description: ${finalDescription || 'N/A'}
     `;
 
     await notifyAdmin(subject, messageText);
@@ -140,20 +154,23 @@ exports.createServiceBooking = async (req, res, next) => {
       data: {
         _id: booking._id,
         serviceId: booking.serviceId,
-        serviceTitle: booking.serviceTitle,
-        servicePrice: booking.servicePrice,
-        date: booking.date,
-        time: booking.time,
+        name: booking.name,
+        phone: booking.phone,
+        preferredDate: booking.date, // API uses preferredDate
+        preferredTime: booking.time, // API uses preferredTime
         address: booking.address,
+        nearLandmark: booking.nearLandmark || '',
+        pincode: booking.pincode || '',
+        alternateNumber: booking.alternateNumber || '',
+        notes: booking.description, // API uses notes
         addressType: booking.addressType,
         contactName: booking.contactName,
         contactPhone: booking.contactPhone,
+        status: booking.status,
         paymentOption: booking.paymentOption,
         paymentStatus: booking.paymentStatus,
-        status: booking.status,
-        bookingId: booking.bookingId,
-        createdAt: booking.createdAt,
-        updatedAt: booking.updatedAt
+        orderId: booking.orderId,
+        createdAt: booking.createdAt
       }
     });
   } catch (error) {
@@ -166,7 +183,7 @@ exports.getMyServiceBookings = async (req, res, next) => {
   try {
     const userId = req.user._id || req.user.id;
     const { status, page = 1, limit = 20 } = req.query;
-    
+
     // Build query - only get bookings for the authenticated user
     let query = { userId };
     if (status) {
@@ -175,7 +192,7 @@ exports.getMyServiceBookings = async (req, res, next) => {
 
     // Calculate pagination
     const skip = (parseInt(page) - 1) * parseInt(limit);
-    
+
     // Get bookings with pagination
     const bookings = await ServiceBooking.find(query)
       .populate('serviceId', 'title description price')
@@ -188,11 +205,19 @@ exports.getMyServiceBookings = async (req, res, next) => {
 
     res.status(200).json({
       success: true,
-      data: bookings.map(booking => ({
-        ...booking.toObject(),
-        bookingId: booking.bookingId,
-        paymentStatus: booking.paymentStatus
-      })),
+      data: bookings.map(booking => {
+        const bookingObj = booking.toObject();
+        return {
+          ...bookingObj,
+          preferredDate: bookingObj.date, // API uses preferredDate
+          preferredTime: bookingObj.time, // API uses preferredTime
+          notes: bookingObj.description, // API uses notes
+          nearLandmark: bookingObj.nearLandmark || '',
+          pincode: bookingObj.pincode || '',
+          alternateNumber: bookingObj.alternateNumber || '',
+          // Keep date/time for backward compatibility but prefer preferredDate/preferredTime
+        };
+      }),
       total,
       page: parseInt(page),
       limit: parseInt(limit)
@@ -206,7 +231,7 @@ exports.getMyServiceBookings = async (req, res, next) => {
 exports.getAllServiceBookings = async (req, res, next) => {
   try {
     const { status, page = 1, limit = 10 } = req.query;
-    
+
     // Build query
     let query = {};
     if (status) {
@@ -215,7 +240,7 @@ exports.getAllServiceBookings = async (req, res, next) => {
 
     // Calculate pagination
     const skip = (parseInt(page) - 1) * parseInt(limit);
-    
+
     // Get bookings with pagination
     const bookings = await ServiceBooking.find(query)
       .populate('serviceId', 'title')
@@ -229,7 +254,19 @@ exports.getAllServiceBookings = async (req, res, next) => {
 
     res.status(200).json({
       success: true,
-      data: bookings,
+      data: bookings.map(booking => {
+        const bookingObj = booking.toObject();
+        return {
+          ...bookingObj,
+          preferredDate: bookingObj.date, // API uses preferredDate
+          preferredTime: bookingObj.time, // API uses preferredTime
+          notes: bookingObj.description, // API uses notes
+          nearLandmark: bookingObj.nearLandmark || '',
+          pincode: bookingObj.pincode || '',
+          alternateNumber: bookingObj.alternateNumber || '',
+          // Keep date/time for backward compatibility but prefer preferredDate/preferredTime
+        };
+      }),
       total,
       page: parseInt(page),
       limit: parseInt(limit)
@@ -242,8 +279,12 @@ exports.getAllServiceBookings = async (req, res, next) => {
 // Update service booking (Admin or User - can update time, date, or status)
 exports.updateServiceBooking = async (req, res, next) => {
   try {
-    const { time, date, status } = req.body;
+    const { time, date, preferredTime, preferredDate, status } = req.body;
     const bookingId = req.params.id;
+
+    // Map preferredDate/preferredTime to date/time for backward compatibility
+    const finalDate = preferredDate || date;
+    const finalTime = preferredTime || time;
 
     const booking = await ServiceBooking.findById(bookingId);
     if (!booking) {
@@ -267,24 +308,24 @@ exports.updateServiceBooking = async (req, res, next) => {
     const updateData = {};
 
     // Validate and update time slot if provided
-    if (time !== undefined) {
+    if (finalTime !== undefined) {
       const validTimeSlots = ['10-12', '12-2', '2-4', '4-6', '6-8'];
-      if (!validTimeSlots.includes(time)) {
+      if (!validTimeSlots.includes(finalTime)) {
         return res.status(400).json({
           success: false,
           message: `Invalid time slot. Valid slots are: ${validTimeSlots.join(', ')}`,
           error: 'VALIDATION_ERROR'
         });
       }
-      updateData.time = time;
+      updateData.time = finalTime;
     }
 
     // Validate and update date if provided
-    if (date !== undefined) {
-      const bookingDate = new Date(date);
+    if (finalDate !== undefined) {
+      const bookingDate = new Date(finalDate);
       const today = new Date();
       today.setHours(0, 0, 0, 0);
-      
+
       if (bookingDate <= today) {
         return res.status(400).json({
           success: false,
@@ -292,15 +333,15 @@ exports.updateServiceBooking = async (req, res, next) => {
           error: 'VALIDATION_ERROR'
         });
       }
-      
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(finalDate)) {
         return res.status(400).json({
           success: false,
           message: 'Date must be in YYYY-MM-DD format',
           error: 'VALIDATION_ERROR'
         });
       }
-      updateData.date = date;
+      updateData.date = finalDate;
     }
 
     // Validate and update status if provided (admin only)
@@ -332,10 +373,15 @@ exports.updateServiceBooking = async (req, res, next) => {
     )
       .populate('serviceId', 'title');
 
+    const bookingObj = updatedBooking.toObject();
     res.status(200).json({
       success: true,
       message: 'Booking updated successfully',
-      data: updatedBooking
+      data: {
+        ...bookingObj,
+        preferredDate: bookingObj.date, // API uses preferredDate
+        preferredTime: bookingObj.time, // API uses preferredTime
+      }
     });
   } catch (error) {
     next(error);
@@ -356,8 +402,10 @@ exports.updateServiceBookingStatus = async (req, res, next) => {
       });
     }
 
+    // Support both :id and :leadId for backward compatibility
+    const bookingId = req.params.leadId || req.params.id;
     const booking = await ServiceBooking.findByIdAndUpdate(
-      req.params.id,
+      bookingId,
       { status },
       { new: true, runValidators: true }
     )
@@ -371,12 +419,15 @@ exports.updateServiceBookingStatus = async (req, res, next) => {
       });
     }
 
+    const bookingObj = booking.toObject();
     res.status(200).json({
       success: true,
       message: 'Lead status updated',
       data: {
         _id: booking._id,
         status: booking.status,
+        preferredDate: bookingObj.date, // API uses preferredDate
+        preferredTime: bookingObj.time, // API uses preferredTime
         updatedAt: booking.updatedAt
       }
     });

@@ -299,10 +299,10 @@ exports.validateServiceBooking = [
     })
     .matches(/^\+[1-9]\d{1,14}$/)
     .withMessage('Please provide a valid E.164 phone number (e.g., +919999999999)'),
+  // Accept either date or preferredDate (API uses preferredDate)
   body('date')
+    .optional()
     .trim()
-    .notEmpty()
-    .withMessage('Date is required')
     .matches(/^\d{4}-\d{2}-\d{2}$/)
     .withMessage('Date must be in YYYY-MM-DD format')
     .custom((value) => {
@@ -314,12 +314,41 @@ exports.validateServiceBooking = [
       }
       return true;
     }),
-  body('time')
+  body('preferredDate')
+    .optional()
     .trim()
-    .notEmpty()
-    .withMessage('Time slot is required')
+    .matches(/^\d{4}-\d{2}-\d{2}$/)
+    .withMessage('Preferred date must be in YYYY-MM-DD format')
+    .custom((value) => {
+      const bookingDate = new Date(value);
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      if (bookingDate <= today) {
+        throw new Error('Booking date must be in the future');
+      }
+      return true;
+    }),
+  // Accept either time or preferredTime (API uses preferredTime)
+  body('time')
+    .optional()
+    .trim()
     .isIn(['10-12', '12-2', '2-4', '4-6', '6-8'])
     .withMessage('Invalid time slot. Valid slots are: 10-12, 12-2, 2-4, 4-6, 6-8'),
+  body('preferredTime')
+    .optional()
+    .trim()
+    .isIn(['10-12', '12-2', '2-4', '4-6', '6-8'])
+    .withMessage('Invalid time slot. Valid slots are: 10-12, 12-2, 2-4, 4-6, 6-8'),
+  // Require at least one of date/preferredDate and time/preferredTime
+  body().custom((value) => {
+    if (!value.date && !value.preferredDate) {
+      throw new Error('Either date or preferredDate is required');
+    }
+    if (!value.time && !value.preferredTime) {
+      throw new Error('Either time or preferredTime is required');
+    }
+    return true;
+  }),
   body('address')
     .trim()
     .notEmpty()
@@ -362,6 +391,9 @@ exports.validateServiceBooking = [
     .isIn(['payNow', 'payLater'])
     .withMessage('Payment option must be either "payNow" or "payLater"'),
   body('description')
+    .optional()
+    .trim(),
+  body('notes')
     .optional()
     .trim(),
   body('images')

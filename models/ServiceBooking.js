@@ -73,6 +73,35 @@ const serviceBookingSchema = new mongoose.Schema({
     trim: true,
     minlength: [10, 'Address must be at least 10 characters long']
   },
+  nearLandmark: {
+    type: String,
+    trim: true,
+    default: ''
+  },
+  pincode: {
+    type: String,
+    trim: true,
+    default: '',
+    validate: {
+      validator: function (v) {
+        if (!v) return true; // Optional field
+        return /^\d{6}$/.test(v);
+      },
+      message: 'Pincode must be 6 digits'
+    }
+  },
+  alternateNumber: {
+    type: String,
+    trim: true,
+    default: '',
+    validate: {
+      validator: function (v) {
+        if (!v) return true; // Optional field
+        return /^\d{10,}$/.test(v.replace(/\D/g, ''));
+      },
+      message: 'Alternate number must contain at least 10 digits'
+    }
+  },
   addressType: {
     type: String,
     required: [true, 'Address type is required'],
@@ -129,7 +158,7 @@ const serviceBookingSchema = new mongoose.Schema({
 });
 
 // Generate booking ID before saving
-serviceBookingSchema.pre('save', async function(next) {
+serviceBookingSchema.pre('save', async function (next) {
   if (!this.bookingId) {
     const year = new Date().getFullYear();
     const count = await mongoose.model('ServiceBooking').countDocuments({});

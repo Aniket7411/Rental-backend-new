@@ -308,6 +308,9 @@ exports.createRentalInquiry = async (req, res, next) => {
     // Determine product category
     const productCategory = product.category || 'AC';
 
+    // Get duration from request body (API uses duration)
+    const duration = req.body.duration || 'Monthly';
+
     // Create inquiry
     const inquiry = await RentalInquiry.create({
       productId: finalProductId,
@@ -317,7 +320,8 @@ exports.createRentalInquiry = async (req, res, next) => {
       name,
       email,
       phone,
-      message: message || ''
+      message: message || '',
+      duration: duration
     });
 
     // Notify admin
@@ -328,11 +332,11 @@ exports.createRentalInquiry = async (req, res, next) => {
       message: 'Rental inquiry submitted successfully',
       data: {
         _id: inquiry._id,
-        productId: inquiry.productId,
-        productCategory: inquiry.productCategory,
+        acId: inquiry.productId, // API uses acId
         name: inquiry.name,
-        phone: inquiry.phone,
         email: inquiry.email,
+        phone: inquiry.phone,
+        duration: inquiry.duration,
         message: inquiry.message,
         status: inquiry.status,
         createdAt: inquiry.createdAt

@@ -27,7 +27,7 @@ const userSchema = new mongoose.Schema({
     required: [true, 'Phone is required'],
     trim: true,
     validate: {
-      validator: function(v) {
+      validator: function (v) {
         return /^\d{10,}$/.test(v.replace(/\D/g, ''));
       },
       message: 'Phone must contain at least 10 digits'
@@ -37,6 +37,28 @@ const userSchema = new mongoose.Schema({
     type: String,
     trim: true,
     default: ''
+  },
+  pincode: {
+    type: String,
+    trim: true,
+    default: ''
+  },
+  nearLandmark: {
+    type: String,
+    trim: true,
+    default: ''
+  },
+  alternateNumber: {
+    type: String,
+    trim: true,
+    default: '',
+    validate: {
+      validator: function (v) {
+        if (!v) return true; // Optional field
+        return /^\d{10,}$/.test(v.replace(/\D/g, ''));
+      },
+      message: 'Alternate number must contain at least 10 digits'
+    }
   },
   interestedIn: {
     type: [String],
@@ -55,7 +77,7 @@ const userSchema = new mongoose.Schema({
 });
 
 // Hash password before saving
-userSchema.pre('save', async function(next) {
+userSchema.pre('save', async function (next) {
   if (!this.isModified('password')) {
     return next();
   }
@@ -65,7 +87,7 @@ userSchema.pre('save', async function(next) {
 });
 
 // Method to compare password
-userSchema.methods.comparePassword = async function(candidatePassword) {
+userSchema.methods.comparePassword = async function (candidatePassword) {
   return await bcrypt.compare(candidatePassword, this.password);
 };
 

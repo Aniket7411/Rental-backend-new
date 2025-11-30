@@ -13,13 +13,12 @@ exports.getAllRentalInquiries = async (req, res, next) => {
     // Format response
     const formattedInquiries = inquiries.map(inquiry => ({
       _id: inquiry._id,
-      productId: inquiry.productId || inquiry.acId,
-      productCategory: inquiry.productCategory || 'AC',
+      acId: inquiry.productId || inquiry.acId, // API uses acId
       name: inquiry.name,
-      phone: inquiry.phone,
       email: inquiry.email,
+      phone: inquiry.phone,
+      duration: inquiry.duration || 'Monthly',
       message: inquiry.message,
-      acDetails: inquiry.acDetails || {},
       status: inquiry.status,
       createdAt: inquiry.createdAt
     }));
@@ -39,16 +38,18 @@ exports.updateInquiryStatus = async (req, res, next) => {
   try {
     const { status } = req.body;
 
-    const allowedStatuses = ['Pending', 'Contacted', 'Completed', 'Cancelled'];
+    const allowedStatuses = ['New', 'Contacted', 'In-Progress', 'Resolved', 'Rejected'];
     if (!allowedStatuses.includes(status)) {
       return res.status(400).json({
         success: false,
-        message: 'Invalid status. Must be one of: Pending, Contacted, Completed, Cancelled'
+        message: 'Invalid status. Must be one of: New, Contacted, In-Progress, Resolved, Rejected'
       });
     }
 
+    // Support both :id and :inquiryId for backward compatibility
+    const inquiryId = req.params.inquiryId || req.params.id;
     const inquiry = await RentalInquiry.findByIdAndUpdate(
-      req.params.id,
+      inquiryId,
       { status },
       { new: true, runValidators: true }
     );
@@ -60,6 +61,7 @@ exports.updateInquiryStatus = async (req, res, next) => {
       });
     }
 
+    const inquiryObj = inquiry.toObject();
     res.status(200).json({
       success: true,
       message: 'Inquiry status updated',

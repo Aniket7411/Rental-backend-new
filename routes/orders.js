@@ -7,12 +7,12 @@ const {
   updateOrderStatus,
   cancelOrder
 } = require('../controllers/orderController');
-const { auth, adminAuth } = require('../middleware/auth');
+const { auth, adminAuth, userOrAdminAuth } = require('../middleware/auth');
 
 // User routes
 router.get('/:orderId', auth, getOrderById);
 router.post('/', auth, createOrder);
-router.post('/:orderId/cancel', auth, cancelOrder);
+router.patch('/:orderId/cancel', userOrAdminAuth, cancelOrder);
 
 // Admin routes
 router.patch('/:orderId/status', adminAuth, updateOrderStatus);

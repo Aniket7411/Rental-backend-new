@@ -68,10 +68,15 @@ const rentalInquirySchema = new mongoose.Schema({
     trim: true,
     default: ''
   },
+  duration: {
+    type: String,
+    enum: ['Monthly', 'Quarterly', 'Yearly'],
+    default: 'Monthly'
+  },
   status: {
     type: String,
-    enum: ['Pending', 'Contacted', 'Completed', 'Cancelled'],
-    default: 'Pending'
+    enum: ['New', 'Contacted', 'In-Progress', 'Resolved', 'Rejected'],
+    default: 'New'
   }
 }, {
   timestamps: true

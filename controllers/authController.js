@@ -40,18 +40,32 @@ exports.login = async (req, res, next) => {
     const token = generateToken(user._id, user.email, user.role);
 
     // Return user with role (admin or user)
+    // Support both nested and top-level address formats per USER.md
+    const userResponse = {
+      id: user._id,
+      _id: user._id,
+      name: user.name,
+      email: user.email,
+      role: user.role, // 'admin' or 'user'
+      phone: user.phone,
+      homeAddress: user.homeAddress || '',
+      nearLandmark: user.nearLandmark || '',
+      pincode: user.pincode || '',
+      alternateNumber: user.alternateNumber || '',
+      interestedIn: user.interestedIn || [],
+      // Nested address format for backward compatibility
+      address: {
+        homeAddress: user.homeAddress || '',
+        nearLandmark: user.nearLandmark || '',
+        pincode: user.pincode || '',
+        alternateNumber: user.alternateNumber || ''
+      }
+    };
+
     res.json({
       success: true,
       token,
-      user: {
-        id: user._id,
-        name: user.name,
-        email: user.email,
-        role: user.role, // 'admin' or 'user'
-        phone: user.phone,
-        homeAddress: user.homeAddress || '',
-        interestedIn: user.interestedIn || []
-      }
+      user: userResponse
     });
   } catch (error) {
     next(error);
@@ -104,19 +118,33 @@ exports.signup = async (req, res, next) => {
     // Generate token
     const token = generateToken(user._id, user.email, user.role);
 
+    // Support both nested and top-level address formats per USER.md
+    const userResponse = {
+      id: user._id,
+      _id: user._id,
+      name: user.name,
+      email: user.email,
+      role: user.role,
+      phone: user.phone,
+      homeAddress: user.homeAddress || '',
+      nearLandmark: user.nearLandmark || '',
+      pincode: user.pincode || '',
+      alternateNumber: user.alternateNumber || '',
+      interestedIn: user.interestedIn || [],
+      // Nested address format for backward compatibility
+      address: {
+        homeAddress: user.homeAddress || '',
+        nearLandmark: user.nearLandmark || '',
+        pincode: user.pincode || '',
+        alternateNumber: user.alternateNumber || ''
+      }
+    };
+
     res.status(201).json({
       success: true,
       message: 'Account created successfully',
       token,
-      user: {
-        id: user._id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-        phone: user.phone,
-        homeAddress: user.homeAddress || '',
-        interestedIn: user.interestedIn || []
-      }
+      user: userResponse
     });
   } catch (error) {
     next(error);
@@ -156,11 +184,11 @@ exports.forgotPassword = async (req, res, next) => {
 
     // Send email with reset link
     const resetUrl = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/reset-password?token=${resetToken}`;
-    
+
     // In production, send email here
     // For now, we'll just log it
     console.log('Password reset link:', resetUrl);
-    
+
     // TODO: Send email using nodemailer
     // await sendPasswordResetEmail(user.email, resetUrl);
 
