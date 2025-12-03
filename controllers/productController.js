@@ -143,7 +143,8 @@ exports.createProduct = async (req, res, next) => {
       energyRating,
       operationType,
       loadType,
-      status = 'Available'
+      status = 'Available',
+      installationCharges
     } = req.body;
 
     // Validation
@@ -163,7 +164,60 @@ exports.createProduct = async (req, res, next) => {
       });
     }
 
-    const product = await Product.create({
+    // Validate installationCharges - only for AC category
+    if (installationCharges && category !== 'AC') {
+      return res.status(400).json({
+        success: false,
+        message: 'Installation charges are only applicable for AC products',
+        error: 'VALIDATION_ERROR'
+      });
+    }
+
+    // Validate installationCharges structure if provided
+    if (installationCharges && category === 'AC') {
+      if (typeof installationCharges.amount !== 'number' || installationCharges.amount < 0) {
+        return res.status(400).json({
+          success: false,
+          message: 'Installation charges amount must be a non-negative number',
+          error: 'VALIDATION_ERROR'
+        });
+      }
+
+      if (installationCharges.includedItems && !Array.isArray(installationCharges.includedItems)) {
+        return res.status(400).json({
+          success: false,
+          message: 'Included items must be an array',
+          error: 'VALIDATION_ERROR'
+        });
+      }
+
+      if (installationCharges.extraMaterialRates) {
+        const rates = installationCharges.extraMaterialRates;
+        if (rates.copperPipe !== undefined && (typeof rates.copperPipe !== 'number' || rates.copperPipe < 0)) {
+          return res.status(400).json({
+            success: false,
+            message: 'Copper pipe rate must be a non-negative number',
+            error: 'VALIDATION_ERROR'
+          });
+        }
+        if (rates.drainPipe !== undefined && (typeof rates.drainPipe !== 'number' || rates.drainPipe < 0)) {
+          return res.status(400).json({
+            success: false,
+            message: 'Drain pipe rate must be a non-negative number',
+            error: 'VALIDATION_ERROR'
+          });
+        }
+        if (rates.electricWire !== undefined && (typeof rates.electricWire !== 'number' || rates.electricWire < 0)) {
+          return res.status(400).json({
+            success: false,
+            message: 'Electric wire rate must be a non-negative number',
+            error: 'VALIDATION_ERROR'
+          });
+        }
+      }
+    }
+
+    const productData = {
       category,
       name,
       brand,
@@ -179,17 +233,27 @@ exports.createProduct = async (req, res, next) => {
       operationType,
       loadType,
       status
-    });
+    };
+
+    // Only add installationCharges if category is AC
+    if (category === 'AC' && installationCharges) {
+      productData.installationCharges = {
+        amount: installationCharges.amount || 0,
+        includedItems: installationCharges.includedItems || [],
+        extraMaterialRates: {
+          copperPipe: installationCharges.extraMaterialRates?.copperPipe || 0,
+          drainPipe: installationCharges.extraMaterialRates?.drainPipe || 0,
+          electricWire: installationCharges.extraMaterialRates?.electricWire || 0
+        }
+      };
+    }
+
+    const product = await Product.create(productData);
 
     res.status(201).json({
       success: true,
       message: 'Product added successfully',
-      data: {
-        _id: product._id,
-        category: product.category,
-        name: product.name,
-        createdAt: product.createdAt
-      }
+      data: product
     });
   } catch (error) {
     next(error);
@@ -209,9 +273,81 @@ exports.updateProduct = async (req, res, next) => {
       });
     }
 
+    // Validate installationCharges - only for AC category
+    if (req.body.installationCharges !== undefined) {
+      if (product.category !== 'AC' && req.body.installationCharges !== null) {
+        return res.status(400).json({
+          success: false,
+          message: 'Installation charges are only applicable for AC products',
+          error: 'VALIDATION_ERROR'
+        });
+      }
+
+      // If setting to null, remove installationCharges
+      if (req.body.installationCharges === null) {
+        product.installationCharges = undefined;
+      } else if (product.category === 'AC' && req.body.installationCharges) {
+        const installationCharges = req.body.installationCharges;
+
+        // Validate installationCharges structure
+        if (typeof installationCharges.amount !== 'number' || installationCharges.amount < 0) {
+          return res.status(400).json({
+            success: false,
+            message: 'Installation charges amount must be a non-negative number',
+            error: 'VALIDATION_ERROR'
+          });
+        }
+
+        if (installationCharges.includedItems && !Array.isArray(installationCharges.includedItems)) {
+          return res.status(400).json({
+            success: false,
+            message: 'Included items must be an array',
+            error: 'VALIDATION_ERROR'
+          });
+        }
+
+        if (installationCharges.extraMaterialRates) {
+          const rates = installationCharges.extraMaterialRates;
+          if (rates.copperPipe !== undefined && (typeof rates.copperPipe !== 'number' || rates.copperPipe < 0)) {
+            return res.status(400).json({
+              success: false,
+              message: 'Copper pipe rate must be a non-negative number',
+              error: 'VALIDATION_ERROR'
+            });
+          }
+          if (rates.drainPipe !== undefined && (typeof rates.drainPipe !== 'number' || rates.drainPipe < 0)) {
+            return res.status(400).json({
+              success: false,
+              message: 'Drain pipe rate must be a non-negative number',
+              error: 'VALIDATION_ERROR'
+            });
+          }
+          if (rates.electricWire !== undefined && (typeof rates.electricWire !== 'number' || rates.electricWire < 0)) {
+            return res.status(400).json({
+              success: false,
+              message: 'Electric wire rate must be a non-negative number',
+              error: 'VALIDATION_ERROR'
+            });
+          }
+        }
+
+        // Update installationCharges
+        product.installationCharges = {
+          amount: installationCharges.amount || 0,
+          includedItems: installationCharges.includedItems || [],
+          extraMaterialRates: {
+            copperPipe: installationCharges.extraMaterialRates?.copperPipe || 0,
+            drainPipe: installationCharges.extraMaterialRates?.drainPipe || 0,
+            electricWire: installationCharges.extraMaterialRates?.electricWire || 0
+          }
+        };
+      }
+    }
+
+    // Update other fields
     const updateFields = req.body;
     Object.keys(updateFields).forEach(key => {
-      if (updateFields[key] !== undefined) {
+      if (key !== 'installationCharges' && updateFields[key] !== undefined) {
         product[key] = updateFields[key];
       }
     });
@@ -221,11 +357,7 @@ exports.updateProduct = async (req, res, next) => {
     res.json({
       success: true,
       message: 'Product updated successfully',
-      data: {
-        _id: product._id,
-        name: product.name,
-        updatedAt: product.updatedAt
-      }
+      data: product
     });
   } catch (error) {
     next(error);

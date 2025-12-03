@@ -251,12 +251,26 @@ exports.createOrder = async (req, res, next) => {
           capacity: product.capacity,
           location: product.location,
           images: product.images,
-          price: product.price
+          price: product.price,
+          installationCharges: product.installationCharges || null
         };
 
         // Use productDetails from frontend if provided, otherwise use snapshot
         const productDetails = item.productDetails || productSnapshot;
         const deliveryInfo = item.deliveryInfo || {};
+
+        // Calculate installation charges for AC products
+        let installationChargesAmount = 0;
+        if (product.category === 'AC' && product.installationCharges && product.installationCharges.amount) {
+          installationChargesAmount = product.installationCharges.amount;
+        }
+
+        // If frontend provides installationCharges in item, use that (for flexibility)
+        if (item.installationCharges !== undefined && item.installationCharges !== null) {
+          installationChargesAmount = typeof item.installationCharges === 'number' 
+            ? item.installationCharges 
+            : (item.installationCharges.amount || 0);
+        }
 
         processedItems.push({
           type: 'rental',
@@ -266,10 +280,23 @@ exports.createOrder = async (req, res, next) => {
           deliveryInfo: deliveryInfo,
           quantity: item.quantity,
           price: item.price,
-          duration: duration
+          duration: duration,
+          installationCharges: installationChargesAmount > 0 ? {
+            amount: installationChargesAmount,
+            includedItems: product.installationCharges?.includedItems || [],
+            extraMaterialRates: product.installationCharges?.extraMaterialRates || {
+              copperPipe: 0,
+              drainPipe: 0,
+              electricWire: 0
+            }
+          } : null
         });
 
+        // Add rental price and installation charges to total
         calculatedTotal += item.price;
+        if (installationChargesAmount > 0) {
+          calculatedTotal += installationChargesAmount;
+        }
       } else if (item.type === 'service') {
         // Process service item
         if (!item.serviceId || !item.price || !item.bookingDetails) {

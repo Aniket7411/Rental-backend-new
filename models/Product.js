@@ -143,6 +143,34 @@ const productSchema = new mongoose.Schema({
     enum: ['Available', 'Rented Out', 'Under Maintenance'],
     default: 'Available',
     index: true
+  },
+  installationCharges: {
+    amount: {
+      type: Number,
+      default: 0,
+      min: 0
+    },
+    includedItems: [{
+      type: String,
+      trim: true
+    }],
+    extraMaterialRates: {
+      copperPipe: {
+        type: Number,
+        default: 0,
+        min: 0
+      },
+      drainPipe: {
+        type: Number,
+        default: 0,
+        min: 0
+      },
+      electricWire: {
+        type: Number,
+        default: 0,
+        min: 0
+      }
+    }
   }
 }, {
   timestamps: true
@@ -157,6 +185,30 @@ productSchema.pre('save', function (next) {
     const sum = this.reviews.reduce((acc, review) => acc + review.rating, 0);
     this.averageRating = sum / this.reviews.length;
     this.totalReviews = this.reviews.length;
+  }
+  next();
+});
+
+// Validate installationCharges - only allowed for AC category
+productSchema.pre('save', function (next) {
+  // Only allow installationCharges for AC category
+  if (this.category !== 'AC' && this.installationCharges) {
+    // Remove installationCharges for non-AC products
+    this.installationCharges = undefined;
+  }
+  // If installationCharges amount is 0 or not provided, set to default structure
+  if (this.category === 'AC' && this.installationCharges) {
+    if (!this.installationCharges.amount || this.installationCharges.amount === 0) {
+      this.installationCharges = {
+        amount: 0,
+        includedItems: this.installationCharges.includedItems || [],
+        extraMaterialRates: {
+          copperPipe: this.installationCharges.extraMaterialRates?.copperPipe || 0,
+          drainPipe: this.installationCharges.extraMaterialRates?.drainPipe || 0,
+          electricWire: this.installationCharges.extraMaterialRates?.electricWire || 0
+        }
+      };
+    }
   }
   next();
 });
