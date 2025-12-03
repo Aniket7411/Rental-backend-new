@@ -407,3 +407,99 @@ exports.validateServiceBooking = [
   handleValidationErrors
 ];
 
+// Validate coupon code
+exports.validateCouponCode = [
+  body('code')
+    .trim()
+    .notEmpty()
+    .withMessage('Coupon code is required')
+    .isLength({ min: 6, max: 20 })
+    .withMessage('Coupon code must be between 6 and 20 characters')
+    .matches(/^[A-Z0-9_-]+$/i)
+    .withMessage('Coupon code must be alphanumeric with hyphens/underscores only'),
+  body('orderTotal')
+    .notEmpty()
+    .withMessage('Order total is required')
+    .isFloat({ min: 0 })
+    .withMessage('Order total must be a positive number'),
+  body('userId')
+    .optional()
+    .isMongoId()
+    .withMessage('User ID must be a valid ObjectId'),
+  body('items')
+    .optional()
+    .isArray()
+    .withMessage('Items must be an array'),
+  handleValidationErrors
+];
+
+// Validate coupon creation (Admin)
+exports.validateCouponCreate = [
+  body('code')
+    .trim()
+    .notEmpty()
+    .withMessage('Coupon code is required')
+    .isLength({ min: 6, max: 20 })
+    .withMessage('Coupon code must be between 6 and 20 characters')
+    .matches(/^[A-Z0-9_-]+$/i)
+    .withMessage('Coupon code must be alphanumeric with hyphens/underscores only'),
+  body('title')
+    .trim()
+    .notEmpty()
+    .withMessage('Coupon title is required'),
+  body('type')
+    .notEmpty()
+    .withMessage('Coupon type is required')
+    .isIn(['percentage', 'fixed'])
+    .withMessage('Coupon type must be percentage or fixed'),
+  body('value')
+    .notEmpty()
+    .withMessage('Coupon value is required')
+    .isFloat({ min: 0 })
+    .withMessage('Coupon value must be a positive number'),
+  body('minAmount')
+    .optional()
+    .isFloat({ min: 0 })
+    .withMessage('Minimum amount must be a positive number'),
+  body('maxDiscount')
+    .optional()
+    .isFloat({ min: 0 })
+    .withMessage('Maximum discount must be a positive number'),
+  body('validFrom')
+    .notEmpty()
+    .withMessage('Valid from date is required')
+    .isISO8601()
+    .withMessage('Valid from must be a valid date'),
+  body('validUntil')
+    .notEmpty()
+    .withMessage('Valid until date is required')
+    .isISO8601()
+    .withMessage('Valid until must be a valid date'),
+  body('usageLimit')
+    .optional()
+    .isInt({ min: 0 })
+    .withMessage('Usage limit must be a non-negative integer'),
+  body('userLimit')
+    .optional()
+    .isInt({ min: 1 })
+    .withMessage('User limit must be at least 1'),
+  body('applicableCategories')
+    .optional()
+    .isArray()
+    .withMessage('Applicable categories must be an array'),
+  body('applicableCategories.*')
+    .optional()
+    .isIn(['AC', 'Refrigerator', 'Washing Machine'])
+    .withMessage('Category must be AC, Refrigerator, or Washing Machine'),
+  body('applicableDurations')
+    .optional()
+    .isArray()
+    .withMessage('Applicable durations must be an array'),
+  body('applicableDurations.*')
+    .optional()
+    .isInt()
+    .isIn([3, 6, 9, 11, 12, 24])
+    .withMessage('Duration must be 3, 6, 9, 11, 12, or 24'),
+  handleValidationErrors
+];
+

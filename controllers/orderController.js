@@ -4,6 +4,8 @@ const Product = require('../models/Product');
 const Service = require('../models/Service');
 const ServiceBooking = require('../models/ServiceBooking');
 const Cart = require('../models/Cart');
+const Coupon = require('../models/Coupon');
+const CouponUsage = require('../models/CouponUsage');
 const { notifyAdmin } = require('../utils/notifications');
 
 // Get User Orders
@@ -132,6 +134,8 @@ exports.createOrder = async (req, res, next) => {
       paymentStatus,
       total,
       discount,
+      couponCode,
+      couponDiscount,
       finalTotal,
       customerInfo,
       deliveryAddresses,
@@ -360,20 +364,147 @@ exports.createOrder = async (req, res, next) => {
       }
     }
 
-    // Calculate discount (5% if payNow)
-    const calculatedDiscount = paymentOption === 'payNow' ? calculatedTotal * 0.05 : 0;
-    const calculatedFinalTotal = calculatedTotal - calculatedDiscount;
+    // Calculate payment discount (5% if payNow)
+    const calculatedPaymentDiscount = paymentOption === 'payNow' ? calculatedTotal * 0.05 : 0;
+
+    // Validate and apply coupon discount if provided
+    let calculatedCouponDiscount = 0;
+    let coupon = null;
+    if (couponCode && couponCode.trim()) {
+      // Find and validate coupon
+      coupon = await Coupon.findOne({ 
+        code: couponCode.trim().toUpperCase(),
+        isActive: true 
+      });
+
+      if (!coupon) {
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid coupon code',
+          error: 'COUPON_NOT_FOUND'
+        });
+      }
+
+      // Check validity dates
+      const now = new Date();
+      if (now < coupon.validFrom || now > coupon.validUntil) {
+        return res.status(400).json({
+          success: false,
+          message: 'Coupon has expired or is not yet valid',
+          error: 'COUPON_EXPIRED'
+        });
+      }
+
+      // Check usage limit
+      if (coupon.usageLimit !== null && coupon.usageCount >= coupon.usageLimit) {
+        return res.status(400).json({
+          success: false,
+          message: 'Coupon usage limit reached',
+          error: 'COUPON_USAGE_LIMIT_REACHED'
+        });
+      }
+
+      // Check minimum amount
+      if (coupon.minAmount && calculatedTotal < coupon.minAmount) {
+        return res.status(400).json({
+          success: false,
+          message: `Minimum order amount of ₹${coupon.minAmount} required`,
+          error: 'COUPON_MIN_AMOUNT_NOT_MET'
+        });
+      }
+
+      // Check user limit
+      if (coupon.userLimit !== null) {
+        const userUsageCount = await CouponUsage.countDocuments({
+          couponId: coupon._id,
+          userId: userId
+        });
+
+        if (userUsageCount >= coupon.userLimit) {
+          return res.status(400).json({
+            success: false,
+            message: 'You have already used this coupon',
+            error: 'COUPON_USER_LIMIT_REACHED'
+          });
+        }
+      }
+
+      // Check category restrictions
+      if (coupon.applicableCategories && coupon.applicableCategories.length > 0) {
+        const orderCategories = processedItems
+          .filter(item => item.type === 'rental' && item.productDetails?.category)
+          .map(item => item.productDetails.category);
+        
+        const hasMatchingCategory = coupon.applicableCategories.some(category =>
+          orderCategories.includes(category)
+        );
+
+        if (!hasMatchingCategory) {
+          return res.status(400).json({
+            success: false,
+            message: 'Coupon not applicable for selected category',
+            error: 'COUPON_CATEGORY_NOT_APPLICABLE'
+          });
+        }
+      }
+
+      // Check duration restrictions
+      if (coupon.applicableDurations && coupon.applicableDurations.length > 0) {
+        const orderDurations = processedItems
+          .filter(item => item.type === 'rental' && item.duration)
+          .map(item => item.duration);
+        
+        const hasMatchingDuration = coupon.applicableDurations.some(duration =>
+          orderDurations.includes(duration)
+        );
+
+        if (!hasMatchingDuration) {
+          return res.status(400).json({
+            success: false,
+            message: 'Coupon not applicable for selected duration',
+            error: 'COUPON_DURATION_NOT_APPLICABLE'
+          });
+        }
+      }
+
+      // Calculate coupon discount
+      if (coupon.type === 'percentage') {
+        calculatedCouponDiscount = calculatedTotal * (coupon.value / 100);
+        // Apply max discount if specified
+        if (coupon.maxDiscount && calculatedCouponDiscount > coupon.maxDiscount) {
+          calculatedCouponDiscount = coupon.maxDiscount;
+        }
+      } else if (coupon.type === 'fixed') {
+        calculatedCouponDiscount = coupon.value;
+        // Ensure discount doesn't exceed order total
+        if (calculatedCouponDiscount > calculatedTotal) {
+          calculatedCouponDiscount = calculatedTotal;
+        }
+      }
+
+      // Round to 2 decimal places
+      calculatedCouponDiscount = Math.round(calculatedCouponDiscount * 100) / 100;
+    }
+
+    // Use provided coupon discount if provided, otherwise use calculated
+    const finalCouponDiscount = couponDiscount !== undefined ? couponDiscount : calculatedCouponDiscount;
+
+    // Calculate final total: Original Total - Payment Discount - Coupon Discount
+    const calculatedFinalTotal = calculatedTotal - calculatedPaymentDiscount - finalCouponDiscount;
 
     // Use provided values or calculated values
     const orderTotal = total || calculatedTotal;
-    const orderDiscount = discount !== undefined ? discount : calculatedDiscount;
+    const orderPaymentDiscount = calculatedPaymentDiscount;
+    const orderCouponDiscount = finalCouponDiscount;
+    const orderDiscount = discount !== undefined ? discount : (orderPaymentDiscount + orderCouponDiscount);
     const orderFinalTotal = finalTotal || calculatedFinalTotal;
 
     // Validate totals match
-    if (Math.abs(orderFinalTotal - (orderTotal - orderDiscount)) > 0.01) {
+    const expectedFinalTotal = orderTotal - orderPaymentDiscount - orderCouponDiscount;
+    if (Math.abs(orderFinalTotal - expectedFinalTotal) > 0.01) {
       return res.status(400).json({
         success: false,
-        message: 'Final total must equal total minus discount',
+        message: `Final total must equal total minus payment discount minus coupon discount. Expected: ${expectedFinalTotal}, Got: ${orderFinalTotal}`,
         error: 'VALIDATION_ERROR'
       });
     }
@@ -403,6 +534,9 @@ exports.createOrder = async (req, res, next) => {
       items: processedItems,
       total: orderTotal,
       discount: orderDiscount,
+      paymentDiscount: orderPaymentDiscount,
+      couponCode: couponCode ? couponCode.trim().toUpperCase() : null,
+      couponDiscount: orderCouponDiscount,
       finalTotal: orderFinalTotal,
       paymentOption,
       paymentStatus: finalPaymentStatus,

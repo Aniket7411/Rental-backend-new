@@ -44,7 +44,7 @@ const orderSchema = new mongoose.Schema({
     },
     duration: {
       type: Number,
-      enum: [3, 6, 9, 11]
+      enum: [3, 6, 9, 11, 12, 24]
       // Duration is required for rental items (validated in controller)
     },
     // For service items
@@ -68,6 +68,21 @@ const orderSchema = new mongoose.Schema({
     min: 0
   },
   discount: {
+    type: Number,
+    default: 0,
+    min: 0
+  },
+  couponCode: {
+    type: String,
+    trim: true,
+    uppercase: true
+  },
+  couponDiscount: {
+    type: Number,
+    default: 0,
+    min: 0
+  },
+  paymentDiscount: {
     type: Number,
     default: 0,
     min: 0

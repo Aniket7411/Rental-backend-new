@@ -48,6 +48,14 @@ const {
   updateFAQ,
   deleteFAQ
 } = require('../controllers/faqController');
+const {
+  getAllCoupons,
+  getCouponById,
+  createCoupon,
+  updateCoupon,
+  deactivateCoupon,
+  getCouponUsageStats
+} = require('../controllers/adminCouponController');
 const { validateAdminLogin, validateAC, validateService } = require('../middleware/validation');
 
 // Admin login (public)
@@ -98,6 +106,14 @@ router.post('/tickets/:ticketId/remarks', adminAuth, addTicketRemark);
 router.post('/faqs', adminAuth, createFAQ);
 router.patch('/faqs/:id', adminAuth, updateFAQ);
 router.delete('/faqs/:id', adminAuth, deleteFAQ);
+
+// Admin coupon routes
+router.get('/coupons', adminAuth, getAllCoupons);
+router.get('/coupons/:id', adminAuth, getCouponById);
+router.post('/coupons', adminAuth, createCoupon);
+router.patch('/coupons/:id', adminAuth, updateCoupon);
+router.patch('/coupons/:id/deactivate', adminAuth, deactivateCoupon);
+router.get('/coupons/:id/stats', adminAuth, getCouponUsageStats);
 
 module.exports = router;
 
