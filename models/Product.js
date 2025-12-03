@@ -60,6 +60,16 @@ const productSchema = new mongoose.Schema({
     11: {
       type: Number,
       required: [true, '11 months price is required']
+    },
+    12: {
+      type: Number,
+      required: false,
+      default: undefined
+    },
+    24: {
+      type: Number,
+      required: false,
+      default: undefined
     }
   },
   discount: {

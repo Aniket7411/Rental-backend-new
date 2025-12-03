@@ -208,17 +208,17 @@ exports.createOrder = async (req, res, next) => {
           });
         }
 
-        // Validate duration - MUST be a number (3, 6, 9, or 11)
+        // Validate duration - MUST be a number (3, 6, 9, 11, 12, or 24)
         let duration = item.duration;
         if (duration === undefined || duration === null) {
           duration = 3; // Default to 3 months
         } else {
           // Convert to number if string is provided
           duration = typeof duration === 'string' ? parseInt(duration, 10) : duration;
-          if (isNaN(duration) || ![3, 6, 9, 11].includes(duration)) {
+          if (isNaN(duration) || ![3, 6, 9, 11, 12, 24].includes(duration)) {
             return res.status(400).json({
               success: false,
-              message: 'Duration must be a number: 3, 6, 9, or 11 months',
+              message: 'Duration must be a number: 3, 6, 9, 11, 12, or 24 months',
               error: 'VALIDATION_ERROR'
             });
           }
@@ -238,6 +238,15 @@ exports.createOrder = async (req, res, next) => {
             success: false,
             message: `Product ${product.brand} ${product.model} is not available`,
             error: 'VALIDATION_ERROR'
+          });
+        }
+
+        // Validate that the product has a price for the selected duration
+        if (!product.price || !product.price[duration]) {
+          return res.status(400).json({
+            success: false,
+            message: `Price for selected duration (${duration} months) is not available for this product`,
+            error: 'PRICE_NOT_AVAILABLE'
           });
         }
 

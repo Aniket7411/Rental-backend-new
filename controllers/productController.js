@@ -40,6 +40,45 @@ exports.getProducts = async (req, res, next) => {
       query.location = new RegExp(location, 'i');
     }
 
+    // Duration filter - filter products that have prices for the specified duration(s)
+    const durationConditions = [];
+    if (duration) {
+      // Support comma-separated duration values (e.g., "3,6,12,24")
+      const durationValues = duration.split(',').map(d => d.trim()).filter(d => d);
+      const validDurations = ['3', '6', '9', '11', '12', '24'];
+      
+      // Validate all provided durations are valid
+      const invalidDurations = durationValues.filter(d => !validDurations.includes(d));
+      if (invalidDurations.length > 0) {
+        return res.status(400).json({
+          success: false,
+          message: `Invalid duration values: ${invalidDurations.join(', ')}. Allowed values: ${validDurations.join(', ')}`,
+          error: 'VALIDATION_ERROR'
+        });
+      }
+
+      // Filter products that have prices for at least one of the requested durations
+      if (durationValues.length > 0) {
+        durationConditions.push(...durationValues.map(d => ({
+          [`price.${d}`]: { $exists: true, $ne: null, $gt: 0 }
+        })));
+      }
+    }
+
+    // Combine duration conditions with existing query
+    if (durationConditions.length > 0) {
+      // If there's already a $or from search, combine with $and
+      if (query.$or) {
+        query.$and = [
+          { $or: query.$or },
+          { $or: durationConditions }
+        ];
+        delete query.$or;
+      } else {
+        query.$or = durationConditions;
+      }
+    }
+
     if (minPrice || maxPrice) {
       const priceQuery = {};
       if (duration) {
@@ -53,8 +92,8 @@ exports.getProducts = async (req, res, next) => {
           }
         }
       } else {
-        // Check all price fields (3, 6, 9, 11 months only)
-        const priceFields = ['price.3', 'price.6', 'price.9', 'price.11'];
+        // Check all price fields (3, 6, 9, 11, 12, 24 months)
+        const priceFields = ['price.3', 'price.6', 'price.9', 'price.11', 'price.12', 'price.24'];
         query.$or = priceFields.map(field => {
           const fieldQuery = {};
           if (minPrice) fieldQuery[field] = { $gte: Number(minPrice) };
@@ -160,6 +199,23 @@ exports.createProduct = async (req, res, next) => {
       return res.status(400).json({
         success: false,
         message: 'All rental duration prices (3, 6, 9, 11 months) are required',
+        error: 'VALIDATION_ERROR'
+      });
+    }
+
+    // Validate 12 and 24 months prices if provided (optional for backward compatibility)
+    if (price['12'] !== undefined && (typeof price['12'] !== 'number' || price['12'] < 0)) {
+      return res.status(400).json({
+        success: false,
+        message: '12 months price must be a positive number',
+        error: 'VALIDATION_ERROR'
+      });
+    }
+
+    if (price['24'] !== undefined && (typeof price['24'] !== 'number' || price['24'] < 0)) {
+      return res.status(400).json({
+        success: false,
+        message: '24 months price must be a positive number',
         error: 'VALIDATION_ERROR'
       });
     }

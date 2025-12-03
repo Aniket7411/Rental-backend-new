@@ -25,12 +25,13 @@ exports.getAllACs = async (req, res, next) => {
     }
 
     // Search functionality - search in brand, model, location
+    const searchConditions = [];
     if (search) {
-      query.$or = [
+      searchConditions.push(
         { brand: { $regex: search, $options: 'i' } },
         { model: { $regex: search, $options: 'i' } },
         { location: { $regex: search, $options: 'i' } }
-      ];
+      );
     }
 
     // Filters
@@ -66,15 +67,42 @@ exports.getAllACs = async (req, res, next) => {
       query.location = { $regex: location, $options: 'i' };
     }
 
-    // Price filters based on duration (3, 6, 9, or 11 months)
+    // Price filters based on duration (3, 6, 9, 11, 12, or 24 months)
+    const durationConditions = [];
     if (duration) {
-      const durationMap = {
-        '3': '3',
-        '6': '6',
-        '9': '9',
-        '11': '11'
-      };
-      // Duration is used for filtering, not querying price directly here
+      // Support comma-separated duration values (e.g., "3,6,12,24")
+      const durationValues = duration.split(',').map(d => d.trim()).filter(d => d);
+      const validDurations = ['3', '6', '9', '11', '12', '24'];
+      
+      // Validate all provided durations are valid
+      const invalidDurations = durationValues.filter(d => !validDurations.includes(d));
+      if (invalidDurations.length > 0) {
+        return res.status(400).json({
+          success: false,
+          message: `Invalid duration values: ${invalidDurations.join(', ')}. Allowed values: ${validDurations.join(', ')}`,
+          error: 'VALIDATION_ERROR'
+        });
+      }
+
+      // Filter products that have prices for at least one of the requested durations
+      if (durationValues.length > 0) {
+        durationConditions.push(...durationValues.map(d => ({
+          [`price.${d}`]: { $exists: true, $ne: null, $gt: 0 }
+        })));
+      }
+    }
+
+    // Combine search and duration conditions properly
+    if (searchConditions.length > 0 && durationConditions.length > 0) {
+      // Need both search match AND duration match
+      query.$and = [
+        { $or: searchConditions },
+        { $or: durationConditions }
+      ];
+    } else if (searchConditions.length > 0) {
+      query.$or = searchConditions;
+    } else if (durationConditions.length > 0) {
+      query.$or = durationConditions;
     }
 
     // Get Products (no pagination as per API doc - returns all results)
