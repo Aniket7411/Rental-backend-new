@@ -82,22 +82,47 @@ exports.validateServiceRequest = [
   handleValidationErrors
 ];
 
-// Validate lead
+// Validate lead (callback lead)
 exports.validateLead = [
   body('name')
     .trim()
     .notEmpty()
-    .withMessage('Name is required'),
+    .withMessage('Name is required')
+    .isLength({ min: 2, max: 100 })
+    .withMessage('Name must be between 2 and 100 characters'),
   body('phone')
     .trim()
     .notEmpty()
-    .withMessage('Phone is required')
+    .withMessage('Phone number is required')
     .customSanitizer((value) => (typeof value === 'string' ? value.replace(/[\s-]/g, '') : value))
-    .matches(/^\+[1-9]\d{1,14}$/)
-    .withMessage('Please provide a valid E.164 phone number (e.g., +919999999999)'),
-  body('message')
+    .matches(/^\+91[0-9]{10}$/)
+    .withMessage('Phone number must be 10 digits with +91 prefix (e.g., +919876543210)'),
+  body('interest')
+    .trim()
+    .notEmpty()
+    .withMessage('Interest type is required')
+    .isIn(['rental', 'service'])
+    .withMessage('Interest must be either "rental" or "service"'),
+  body('source')
+    .trim()
+    .notEmpty()
+    .withMessage('Source is required')
+    .isIn(['browse', 'contact'])
+    .withMessage('Source must be either "browse" or "contact"'),
+  handleValidationErrors
+];
+
+// Validate lead status update (admin)
+exports.validateLeadStatusUpdate = [
+  body('status')
     .optional()
-    .trim(),
+    .isIn(['New', 'Contacted', 'In-Progress', 'Resolved', 'Closed'])
+    .withMessage('Status must be one of: New, Contacted, In-Progress, Resolved, Closed'),
+  body('notes')
+    .optional()
+    .trim()
+    .isLength({ max: 1000 })
+    .withMessage('Notes cannot exceed 1000 characters'),
   handleValidationErrors
 ];
 

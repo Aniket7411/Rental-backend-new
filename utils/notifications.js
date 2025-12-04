@@ -62,7 +62,7 @@ exports.notifyRentalInquiry = async (inquiry) => {
     <p>Please check the admin panel for details.</p>
   `;
   
-  await this.notifyAdmin(subject, message, html);
+  await exports.notifyAdmin(subject, message, html);
 };
 
 // Notify admin about service request
@@ -99,7 +99,7 @@ exports.notifyServiceRequest = async (serviceRequest) => {
     <p>Please check the admin panel for details.</p>
   `;
   
-  await this.notifyAdmin(subject, message, html);
+  await exports.notifyAdmin(subject, message, html);
 };
 
 // Notify admin about new lead
@@ -125,7 +125,7 @@ exports.notifyLead = async (lead) => {
     <p>Please contact the lead soon.</p>
   `;
   
-  await this.notifyAdmin(subject, message, html);
+  await exports.notifyAdmin(subject, message, html);
 };
 
 // SMS notification (placeholder - integrate with SMS service like Twilio)

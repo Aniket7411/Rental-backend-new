@@ -56,7 +56,14 @@ const {
   deleteCoupon,
   getCouponUsageStats
 } = require('../controllers/adminCouponController');
-const { validateAdminLogin, validateAC, validateService } = require('../middleware/validation');
+const {
+  getAllLeads,
+  getLeadById,
+  updateLeadStatus,
+  deleteLead,
+  getLeadStats
+} = require('../controllers/leadController');
+const { validateAdminLogin, validateAC, validateService, validateLeadStatusUpdate } = require('../middleware/validation');
 
 // Admin login (public)
 router.post('/login', validateAdminLogin, login);
@@ -114,6 +121,13 @@ router.post('/coupons', adminAuth, createCoupon);
 router.put('/coupons/:couponId', adminAuth, updateCoupon);
 router.delete('/coupons/:couponId', adminAuth, deleteCoupon);
 router.get('/coupons/:id/stats', adminAuth, getCouponUsageStats);
+
+// Admin callback leads routes
+router.get('/leads', adminAuth, getAllLeads);
+router.get('/leads/stats', adminAuth, getLeadStats);
+router.get('/leads/:id', adminAuth, getLeadById);
+router.patch('/leads/:id', adminAuth, validateLeadStatusUpdate, updateLeadStatus);
+router.delete('/leads/:id', adminAuth, deleteLead);
 
 module.exports = router;
 
