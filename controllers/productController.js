@@ -130,9 +130,23 @@ exports.getProducts = async (req, res, next) => {
     const products = await productsQuery;
     const total = await Product.countDocuments(query);
 
+    // Ensure all 6 duration prices are present in response (backward compatibility)
+    const validDurations = [3, 6, 9, 11, 12, 24];
+    const productsWithPrices = products.map(product => {
+      const productObj = product.toObject ? product.toObject() : product;
+      if (productObj.price) {
+        for (const duration of validDurations) {
+          if (productObj.price[duration] === undefined || productObj.price[duration] === null) {
+            productObj.price[duration] = null; // Set to null for missing prices
+          }
+        }
+      }
+      return productObj;
+    });
+
     res.json({
       success: true,
-      data: products,
+      data: productsWithPrices,
       total,
       page: parseInt(page),
       limit: parseInt(limit)
@@ -155,9 +169,20 @@ exports.getProductById = async (req, res, next) => {
       });
     }
 
+    // Ensure all 6 duration prices are present in response (backward compatibility)
+    const productObj = product.toObject();
+    const validDurations = [3, 6, 9, 11, 12, 24];
+    if (productObj.price) {
+      for (const duration of validDurations) {
+        if (productObj.price[duration] === undefined || productObj.price[duration] === null) {
+          productObj.price[duration] = null; // Set to null for missing prices
+        }
+      }
+    }
+
     res.json({
       success: true,
-      data: product
+      data: productObj
     });
   } catch (error) {
     next(error);
@@ -195,29 +220,57 @@ exports.createProduct = async (req, res, next) => {
       });
     }
 
-    if (!price || !price['3'] || !price['6'] || !price['9'] || !price['11']) {
+    // Validate all required duration prices (3, 6, 9, 11, 12, 24 months)
+    const validDurations = [3, 6, 9, 11, 12, 24];
+    const missingPrices = [];
+    const invalidPrices = [];
+
+    if (!price || typeof price !== 'object') {
       return res.status(400).json({
         success: false,
-        message: 'All rental duration prices (3, 6, 9, 11 months) are required',
+        message: 'Price object is required',
         error: 'VALIDATION_ERROR'
       });
     }
 
-    // Validate 12 and 24 months prices if provided (optional for backward compatibility)
-    if (price['12'] !== undefined && (typeof price['12'] !== 'number' || price['12'] < 0)) {
+    // Check all durations are present and valid
+    for (const duration of validDurations) {
+      if (!price[duration] && price[duration] !== 0) {
+        missingPrices.push(`${duration} months`);
+      } else if (typeof price[duration] !== 'number' || price[duration] <= 0) {
+        invalidPrices.push(`${duration} months`);
+      }
+    }
+
+    if (missingPrices.length > 0) {
       return res.status(400).json({
         success: false,
-        message: '12 months price must be a positive number',
+        message: `Price for ${missingPrices.join(', ')} is required`,
         error: 'VALIDATION_ERROR'
       });
     }
 
-    if (price['24'] !== undefined && (typeof price['24'] !== 'number' || price['24'] < 0)) {
+    if (invalidPrices.length > 0) {
       return res.status(400).json({
         success: false,
-        message: '24 months price must be a positive number',
+        message: `Price for ${invalidPrices.join(', ')} must be a positive number`,
         error: 'VALIDATION_ERROR'
       });
+    }
+
+    // Price consistency validation
+    if (price[12] < price[11]) {
+      return res.status(400).json({
+        success: false,
+        message: '12 months price should be greater than or equal to 11 months price',
+        error: 'VALIDATION_ERROR'
+      });
+    }
+
+    // Warning: 24 months should offer better value (at least 1.5x of 12 months)
+    if (price[24] < price[12] * 1.5) {
+      // Allow it but could log a warning
+      console.warn(`Product creation: 24 months price (${price[24]}) may not offer sufficient discount compared to 12 months (${price[12]})`);
     }
 
     // Validate installationCharges - only for AC category
@@ -327,6 +380,52 @@ exports.updateProduct = async (req, res, next) => {
         message: 'Product not found',
         error: 'NOT_FOUND'
       });
+    }
+
+    // Validate price updates if price is being modified
+    if (req.body.price && typeof req.body.price === 'object') {
+      const validDurations = [3, 6, 9, 11, 12, 24];
+      const updatedPrice = { ...product.price.toObject(), ...req.body.price };
+
+      // Validate all updated prices are positive numbers
+      for (const duration of validDurations) {
+        if (updatedPrice[duration] !== undefined) {
+          if (typeof updatedPrice[duration] !== 'number' || updatedPrice[duration] <= 0) {
+            return res.status(400).json({
+              success: false,
+              message: `Price for ${duration} months must be a positive number`,
+              error: 'VALIDATION_ERROR'
+            });
+          }
+        }
+      }
+
+      // Price consistency validation
+      if (updatedPrice[12] !== undefined && updatedPrice[11] !== undefined) {
+        if (updatedPrice[12] < updatedPrice[11]) {
+          return res.status(400).json({
+            success: false,
+            message: '12 months price should be greater than or equal to 11 months price',
+            error: 'VALIDATION_ERROR'
+          });
+        }
+      }
+
+      // Check if all required prices are present after update
+      const missingPrices = [];
+      for (const duration of validDurations) {
+        if (!updatedPrice[duration] && updatedPrice[duration] !== 0) {
+          missingPrices.push(`${duration} months`);
+        }
+      }
+
+      if (missingPrices.length > 0) {
+        return res.status(400).json({
+          success: false,
+          message: `Price for ${missingPrices.join(', ')} is required`,
+          error: 'VALIDATION_ERROR'
+        });
+      }
     }
 
     // Validate installationCharges - only for AC category

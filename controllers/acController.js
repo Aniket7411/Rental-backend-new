@@ -110,11 +110,24 @@ exports.getAllACs = async (req, res, next) => {
       .sort({ createdAt: -1 })
       .lean();
     
-    const total = products.length;
+    // Ensure all 6 duration prices are present in response (backward compatibility)
+    const validDurations = [3, 6, 9, 11, 12, 24];
+    const productsWithPrices = products.map(product => {
+      if (product.price) {
+        for (const duration of validDurations) {
+          if (product.price[duration] === undefined || product.price[duration] === null) {
+            product.price[duration] = null; // Set to null for missing prices
+          }
+        }
+      }
+      return product;
+    });
+    
+    const total = productsWithPrices.length;
 
     res.status(200).json({
       success: true,
-      data: products,
+      data: productsWithPrices,
       total
     });
   } catch (error) {

@@ -63,13 +63,13 @@ const productSchema = new mongoose.Schema({
     },
     12: {
       type: Number,
-      required: false,
-      default: undefined
+      required: [true, '12 months price is required'],
+      min: [0, '12 months price must be positive']
     },
     24: {
       type: Number,
-      required: false,
-      default: undefined
+      required: [true, '24 months price is required'],
+      min: [0, '24 months price must be positive']
     }
   },
   discount: {
@@ -195,6 +195,43 @@ productSchema.pre('save', function (next) {
     const sum = this.reviews.reduce((acc, review) => acc + review.rating, 0);
     this.averageRating = sum / this.reviews.length;
     this.totalReviews = this.reviews.length;
+  }
+  next();
+});
+
+// Price consistency validation
+productSchema.pre('save', function (next) {
+  if (this.price && this.isNew) {
+    // For new products, validate all durations are present
+    const validDurations = [3, 6, 9, 11, 12, 24];
+    for (const duration of validDurations) {
+      if (!this.price[duration] || this.price[duration] <= 0) {
+        return next(new Error(`Price for ${duration} months is required and must be greater than 0`));
+      }
+    }
+
+    // Price consistency checks
+    // 12 months price should be >= 11 months price
+    if (this.price[12] < this.price[11]) {
+      return next(new Error('12 months price should be greater than or equal to 11 months price'));
+    }
+
+    // 24 months should offer better value (at least 1.5x of 12 months)
+    // This is a warning-level check, but we'll enforce it
+    if (this.price[24] < this.price[12] * 1.5) {
+      // Allow it but log a warning - 24 months should offer better value
+      console.warn(`Product ${this._id}: 24 months price (${this.price[24]}) may not offer sufficient discount compared to 12 months (${this.price[12]})`);
+    }
+
+    // Optional: Check 6 months offers better value than 3 months
+    if (this.price[6] < this.price[3] * 1.5) {
+      console.warn(`Product ${this._id}: 6 months price may not offer sufficient discount`);
+    }
+  } else if (this.price && this.isModified('price')) {
+    // For updates, validate consistency if prices are being modified
+    if (this.price[12] !== undefined && this.price[11] !== undefined && this.price[12] < this.price[11]) {
+      return next(new Error('12 months price should be greater than or equal to 11 months price'));
+    }
   }
   next();
 });
