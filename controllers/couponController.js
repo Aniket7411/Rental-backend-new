@@ -180,8 +180,8 @@ exports.getAvailableCoupons = async (req, res, next) => {
     const { userId, category, minAmount } = req.query;
     const now = new Date();
 
-    // Build query
-    const queryConditions = [
+    // Build base query conditions
+    const baseConditions = [
       { isActive: true },
       { validFrom: { $lte: now } },
       {
@@ -194,7 +194,7 @@ exports.getAvailableCoupons = async (req, res, next) => {
 
     // Filter by category if provided
     if (category) {
-      queryConditions.push({
+      baseConditions.push({
         $or: [
           { applicableCategories: { $size: 0 } }, // No category restriction
           { applicableCategories: category } // Matches category
@@ -205,7 +205,7 @@ exports.getAvailableCoupons = async (req, res, next) => {
     // Filter by minimum amount if provided
     if (minAmount) {
       const minAmountNum = parseFloat(minAmount);
-      queryConditions.push({
+      baseConditions.push({
         $or: [
           { minAmount: { $lte: minAmountNum } },
           { minAmount: 0 },
@@ -214,7 +214,8 @@ exports.getAvailableCoupons = async (req, res, next) => {
       });
     }
 
-    const query = queryConditions.length > 0 ? { $and: queryConditions } : {};
+    // Build final query
+    const query = baseConditions.length > 1 ? { $and: baseConditions } : baseConditions[0] || {};
 
     // Check usage limits
     const coupons = await Coupon.find(query).sort({ createdAt: -1 });
