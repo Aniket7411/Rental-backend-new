@@ -53,7 +53,7 @@ const {
   getCouponById,
   createCoupon,
   updateCoupon,
-  deactivateCoupon,
+  deleteCoupon,
   getCouponUsageStats
 } = require('../controllers/adminCouponController');
 const { validateAdminLogin, validateAC, validateService } = require('../middleware/validation');
@@ -111,8 +111,8 @@ router.delete('/faqs/:id', adminAuth, deleteFAQ);
 router.get('/coupons', adminAuth, getAllCoupons);
 router.get('/coupons/:id', adminAuth, getCouponById);
 router.post('/coupons', adminAuth, createCoupon);
-router.patch('/coupons/:id', adminAuth, updateCoupon);
-router.patch('/coupons/:id/deactivate', adminAuth, deactivateCoupon);
+router.put('/coupons/:couponId', adminAuth, updateCoupon);
+router.delete('/coupons/:couponId', adminAuth, deleteCoupon);
 router.get('/coupons/:id/stats', adminAuth, getCouponUsageStats);
 
 module.exports = router;

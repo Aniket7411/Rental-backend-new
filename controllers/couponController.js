@@ -31,8 +31,8 @@ exports.validateCoupon = async (req, res, next) => {
     if (!coupon) {
       return res.status(404).json({
         success: false,
-        message: 'Invalid coupon code',
-        error: 'COUPON_NOT_FOUND'
+        message: 'Coupon code is invalid or expired',
+        error: 'COUPON_INVALID'
       });
     }
 
@@ -40,8 +40,8 @@ exports.validateCoupon = async (req, res, next) => {
     if (!coupon.isActive) {
       return res.status(400).json({
         success: false,
-        message: 'Coupon is not active',
-        error: 'COUPON_NOT_ACTIVE'
+        message: 'Coupon code is invalid or expired',
+        error: 'COUPON_INVALID'
       });
     }
 
@@ -51,11 +51,11 @@ exports.validateCoupon = async (req, res, next) => {
       return res.status(400).json({
         success: false,
         message: 'Coupon is not yet valid',
-        error: 'COUPON_INVALID_DATE'
+        error: 'COUPON_NOT_STARTED'
       });
     }
 
-    if (now > coupon.validUntil) {
+    if (coupon.validUntil && now > coupon.validUntil) {
       return res.status(400).json({
         success: false,
         message: 'Coupon has expired',
@@ -110,8 +110,8 @@ exports.validateCoupon = async (req, res, next) => {
       if (!hasMatchingCategory) {
         return res.status(400).json({
           success: false,
-          message: 'Coupon not applicable for selected category',
-          error: 'COUPON_CATEGORY_NOT_APPLICABLE'
+          message: 'Coupon code is invalid or expired',
+          error: 'COUPON_NOT_APPLICABLE'
         });
       }
     }
@@ -129,8 +129,8 @@ exports.validateCoupon = async (req, res, next) => {
       if (!hasMatchingDuration) {
         return res.status(400).json({
           success: false,
-          message: 'Coupon not applicable for selected duration',
-          error: 'COUPON_DURATION_NOT_APPLICABLE'
+          message: 'Coupon code is invalid or expired',
+          error: 'COUPON_NOT_APPLICABLE'
         });
       }
     }
@@ -154,15 +154,19 @@ exports.validateCoupon = async (req, res, next) => {
     res.json({
       success: true,
       data: {
+        _id: coupon._id,
         code: coupon.code,
         title: coupon.title,
         description: coupon.description,
         type: coupon.type,
         value: coupon.value,
-        discountAmount: Math.round(discountAmount * 100) / 100, // Round to 2 decimal places
         minAmount: coupon.minAmount,
         maxDiscount: coupon.maxDiscount,
-        validUntil: coupon.validUntil
+        discountAmount: Math.round(discountAmount * 100) / 100, // Round to 2 decimal places
+        validFrom: coupon.validFrom,
+        validUntil: coupon.validUntil,
+        applicableCategories: coupon.applicableCategories,
+        applicableDurations: coupon.applicableDurations
       }
     });
   } catch (error) {
@@ -177,28 +181,40 @@ exports.getAvailableCoupons = async (req, res, next) => {
     const now = new Date();
 
     // Build query
-    const query = {
-      isActive: true,
-      validFrom: { $lte: now },
-      validUntil: { $gte: now }
-    };
+    const queryConditions = [
+      { isActive: true },
+      { validFrom: { $lte: now } },
+      {
+        $or: [
+          { validUntil: null },
+          { validUntil: { $gte: now } }
+        ]
+      }
+    ];
 
     // Filter by category if provided
     if (category) {
-      query.$or = [
-        { applicableCategories: { $size: 0 } }, // No category restriction
-        { applicableCategories: category } // Matches category
-      ];
+      queryConditions.push({
+        $or: [
+          { applicableCategories: { $size: 0 } }, // No category restriction
+          { applicableCategories: category } // Matches category
+        ]
+      });
     }
 
     // Filter by minimum amount if provided
     if (minAmount) {
-      query.$or = [
-        { minAmount: { $lte: parseFloat(minAmount) } },
-        { minAmount: 0 },
-        { minAmount: null }
-      ];
+      const minAmountNum = parseFloat(minAmount);
+      queryConditions.push({
+        $or: [
+          { minAmount: { $lte: minAmountNum } },
+          { minAmount: 0 },
+          { minAmount: null }
+        ]
+      });
     }
+
+    const query = queryConditions.length > 0 ? { $and: queryConditions } : {};
 
     // Check usage limits
     const coupons = await Coupon.find(query).sort({ createdAt: -1 });
@@ -224,6 +240,7 @@ exports.getAvailableCoupons = async (req, res, next) => {
       }
 
       availableCoupons.push({
+        _id: coupon._id,
         code: coupon.code,
         title: coupon.title,
         description: coupon.description,
@@ -231,7 +248,14 @@ exports.getAvailableCoupons = async (req, res, next) => {
         value: coupon.value,
         minAmount: coupon.minAmount,
         maxDiscount: coupon.maxDiscount,
-        validUntil: coupon.validUntil
+        validFrom: coupon.validFrom,
+        validUntil: coupon.validUntil,
+        usageLimit: coupon.usageLimit,
+        userLimit: coupon.userLimit,
+        applicableCategories: coupon.applicableCategories,
+        applicableDurations: coupon.applicableDurations,
+        isActive: coupon.isActive,
+        usageCount: coupon.usageCount
       });
     }
 

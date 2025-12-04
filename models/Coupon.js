@@ -46,7 +46,7 @@ const couponSchema = new mongoose.Schema({
   },
   validUntil: {
     type: Date,
-    required: [true, 'Valid until date is required']
+    default: null
   },
   usageLimit: {
     type: Number,
@@ -84,10 +84,14 @@ const couponSchema = new mongoose.Schema({
 couponSchema.index({ code: 1, isActive: 1 });
 couponSchema.index({ validFrom: 1, validUntil: 1 });
 
-// Validation: validFrom must be <= validUntil
+// Validation: validFrom must be <= validUntil (if validUntil is set)
 couponSchema.pre('save', function(next) {
   if (this.validFrom && this.validUntil && this.validFrom > this.validUntil) {
     return next(new Error('Valid from date must be before or equal to valid until date'));
+  }
+  // Validate maxDiscount only for percentage type
+  if (this.type === 'fixed' && this.maxDiscount !== null && this.maxDiscount !== undefined) {
+    return next(new Error('maxDiscount should only be set for percentage type coupons'));
   }
   next();
 });

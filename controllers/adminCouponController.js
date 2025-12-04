@@ -119,7 +119,10 @@ exports.createCoupon = async (req, res, next) => {
     }
 
     // Validate dates
-    if (validFrom && validUntil && new Date(validFrom) > new Date(validUntil)) {
+    const validFromDate = validFrom ? new Date(validFrom) : new Date();
+    const validUntilDate = validUntil ? new Date(validUntil) : null;
+    
+    if (validUntilDate && validFromDate > validUntilDate) {
       return res.status(400).json({
         success: false,
         message: 'Valid from date must be before or equal to valid until date',
@@ -128,18 +131,55 @@ exports.createCoupon = async (req, res, next) => {
     }
 
     // Validate type-specific values
-    if (type === 'percentage' && (value < 0 || value > 100)) {
+    if (type === 'percentage') {
+      if (value < 1 || value > 100) {
+        return res.status(400).json({
+          success: false,
+          message: 'Percentage value must be between 1 and 100',
+          error: 'VALIDATION_ERROR'
+        });
+      }
+    } else if (type === 'fixed') {
+      if (value <= 0) {
+        return res.status(400).json({
+          success: false,
+          message: 'Fixed value must be greater than 0',
+          error: 'VALIDATION_ERROR'
+        });
+      }
+    }
+
+    // Validate maxDiscount only for percentage type
+    if (maxDiscount !== null && maxDiscount !== undefined) {
+      if (type !== 'percentage') {
+        return res.status(400).json({
+          success: false,
+          message: 'maxDiscount should only be set for percentage type coupons',
+          error: 'VALIDATION_ERROR'
+        });
+      }
+      if (maxDiscount <= 0) {
+        return res.status(400).json({
+          success: false,
+          message: 'maxDiscount must be greater than 0',
+          error: 'VALIDATION_ERROR'
+        });
+      }
+    }
+
+    // Validate usageLimit and userLimit
+    if (usageLimit !== null && usageLimit !== undefined && usageLimit <= 0) {
       return res.status(400).json({
         success: false,
-        message: 'Percentage value must be between 0 and 100',
+        message: 'usageLimit must be greater than 0 if provided',
         error: 'VALIDATION_ERROR'
       });
     }
 
-    if (type === 'fixed' && value < 0) {
+    if (userLimit !== null && userLimit !== undefined && userLimit <= 0) {
       return res.status(400).json({
         success: false,
-        message: 'Fixed value must be positive',
+        message: 'userLimit must be greater than 0 if provided',
         error: 'VALIDATION_ERROR'
       });
     }
@@ -150,15 +190,15 @@ exports.createCoupon = async (req, res, next) => {
       description: description || '',
       type,
       value,
-      minAmount: minAmount || 0,
-      maxDiscount: maxDiscount || null,
-      validFrom: validFrom ? new Date(validFrom) : new Date(),
-      validUntil: validUntil ? new Date(validUntil) : new Date(),
-      usageLimit: usageLimit || null,
-      userLimit: userLimit || null,
+      minAmount: minAmount !== undefined && minAmount !== null ? minAmount : 0,
+      maxDiscount: maxDiscount !== undefined ? maxDiscount : null,
+      validFrom: validFromDate,
+      validUntil: validUntilDate,
+      usageLimit: usageLimit !== undefined ? usageLimit : null,
+      userLimit: userLimit !== undefined ? userLimit : null,
       applicableCategories: applicableCategories || [],
       applicableDurations: applicableDurations || [],
-      isActive
+      isActive: isActive !== undefined ? isActive : true
     });
 
     res.status(201).json({
@@ -181,13 +221,13 @@ exports.createCoupon = async (req, res, next) => {
 // Update Coupon (Admin)
 exports.updateCoupon = async (req, res, next) => {
   try {
-    const coupon = await Coupon.findById(req.params.id);
+    const couponId = req.params.couponId || req.params.id;
+    const coupon = await Coupon.findById(couponId);
 
     if (!coupon) {
       return res.status(404).json({
         success: false,
-        message: 'Coupon not found',
-        error: 'NOT_FOUND'
+        message: 'Coupon not found'
       });
     }
 
@@ -207,7 +247,7 @@ exports.updateCoupon = async (req, res, next) => {
       isActive
     } = req.body;
 
-    // Update fields if provided
+    // Update fields if provided (code should NOT be updatable)
     if (title !== undefined) coupon.title = title;
     if (description !== undefined) coupon.description = description;
     if (type !== undefined) coupon.type = type;
@@ -215,7 +255,7 @@ exports.updateCoupon = async (req, res, next) => {
     if (minAmount !== undefined) coupon.minAmount = minAmount;
     if (maxDiscount !== undefined) coupon.maxDiscount = maxDiscount;
     if (validFrom !== undefined) coupon.validFrom = new Date(validFrom);
-    if (validUntil !== undefined) coupon.validUntil = new Date(validUntil);
+    if (validUntil !== undefined) coupon.validUntil = validUntil ? new Date(validUntil) : null;
     if (usageLimit !== undefined) coupon.usageLimit = usageLimit;
     if (userLimit !== undefined) coupon.userLimit = userLimit;
     if (applicableCategories !== undefined) coupon.applicableCategories = applicableCategories;
@@ -223,12 +263,48 @@ exports.updateCoupon = async (req, res, next) => {
     if (isActive !== undefined) coupon.isActive = isActive;
 
     // Validate dates
-    if (coupon.validFrom > coupon.validUntil) {
+    if (coupon.validUntil && coupon.validFrom > coupon.validUntil) {
       return res.status(400).json({
         success: false,
         message: 'Valid from date must be before or equal to valid until date',
         error: 'VALIDATION_ERROR'
       });
+    }
+
+    // Validate type-specific values
+    if (type !== undefined) {
+      if (type === 'percentage' && (value !== undefined && (value < 1 || value > 100))) {
+        return res.status(400).json({
+          success: false,
+          message: 'Percentage value must be between 1 and 100',
+          error: 'VALIDATION_ERROR'
+        });
+      }
+      if (type === 'fixed' && (value !== undefined && value <= 0)) {
+        return res.status(400).json({
+          success: false,
+          message: 'Fixed value must be greater than 0',
+          error: 'VALIDATION_ERROR'
+        });
+      }
+    }
+
+    // Validate maxDiscount only for percentage type
+    if (maxDiscount !== undefined && maxDiscount !== null) {
+      if (coupon.type !== 'percentage') {
+        return res.status(400).json({
+          success: false,
+          message: 'maxDiscount should only be set for percentage type coupons',
+          error: 'VALIDATION_ERROR'
+        });
+      }
+      if (maxDiscount <= 0) {
+        return res.status(400).json({
+          success: false,
+          message: 'maxDiscount must be greater than 0',
+          error: 'VALIDATION_ERROR'
+        });
+      }
     }
 
     await coupon.save();
@@ -243,26 +319,23 @@ exports.updateCoupon = async (req, res, next) => {
   }
 };
 
-// Deactivate Coupon (Admin)
-exports.deactivateCoupon = async (req, res, next) => {
+// Delete Coupon (Admin)
+exports.deleteCoupon = async (req, res, next) => {
   try {
-    const coupon = await Coupon.findById(req.params.id);
+    const coupon = await Coupon.findById(req.params.couponId || req.params.id);
 
     if (!coupon) {
       return res.status(404).json({
         success: false,
-        message: 'Coupon not found',
-        error: 'NOT_FOUND'
+        message: 'Coupon not found'
       });
     }
 
-    coupon.isActive = false;
-    await coupon.save();
+    await Coupon.findByIdAndDelete(coupon._id);
 
     res.json({
       success: true,
-      message: 'Coupon deactivated successfully',
-      data: coupon
+      message: 'Coupon deleted successfully'
     });
   } catch (error) {
     next(error);
