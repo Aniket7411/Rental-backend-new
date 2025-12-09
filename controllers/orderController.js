@@ -204,35 +204,19 @@ exports.createOrder = async (req, res, next) => {
 
       if (item.type === 'rental') {
         // Process rental item
-        if (!item.productId || !item.quantity || !item.price) {
+        if (!item.productId || !item.quantity) {
           return res.status(400).json({
             success: false,
-            message: 'Rental items require productId, quantity, and price',
+            message: 'Rental items require productId and quantity',
             error: 'VALIDATION_ERROR'
           });
         }
 
-        // Validate duration - MUST be a number (3, 6, 9, 11, 12, or 24)
-        let duration = item.duration;
-        if (duration === undefined || duration === null) {
-          duration = 3; // Default to 3 months
-        } else {
-          // Convert to number if string is provided
-          duration = typeof duration === 'string' ? parseInt(duration, 10) : duration;
-          if (isNaN(duration) || ![3, 6, 9, 11, 12, 24].includes(duration)) {
-            return res.status(400).json({
-              success: false,
-              message: 'Duration must be a number: 3, 6, 9, 11, 12, or 24 months',
-              error: 'VALIDATION_ERROR'
-            });
-          }
-        }
-
         const product = await Product.findById(item.productId);
         if (!product) {
-          return res.status(404).json({
+          return res.status(400).json({
             success: false,
-            message: `Product ${item.productId} not found`,
+            message: `Item ${processedItems.length + 1}: Product not found`,
             error: 'NOT_FOUND'
           });
         }
@@ -245,13 +229,102 @@ exports.createOrder = async (req, res, next) => {
           });
         }
 
-        // Validate that the product has a price for the selected duration
-        if (!product.price || !product.price[duration]) {
-          return res.status(400).json({
-            success: false,
-            message: `Price for selected duration (${duration} months) is not available for this product`,
-            error: 'PRICE_NOT_AVAILABLE'
-          });
+        // Handle monthly payment vs regular payment
+        const isMonthlyPayment = item.isMonthlyPayment === true;
+        let duration;
+        let itemPrice;
+
+        if (isMonthlyPayment) {
+          // Validate monthly payment fields
+          if (!item.monthlyPrice || item.monthlyPrice <= 0) {
+            return res.status(400).json({
+              success: false,
+              message: `Item ${processedItems.length + 1}: Monthly price is required and must be greater than 0`,
+              error: 'VALIDATION_ERROR'
+            });
+          }
+
+          if (!item.monthlyTenure || item.monthlyTenure < 3) {
+            return res.status(400).json({
+              success: false,
+              message: `Item ${processedItems.length + 1}: Monthly tenure must be at least 3 months`,
+              error: 'VALIDATION_ERROR'
+            });
+          }
+
+          // Validate monthlyTenure is one of the allowed values
+          const allowedMonthlyTenures = [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 18, 24];
+          if (!allowedMonthlyTenures.includes(item.monthlyTenure)) {
+            return res.status(400).json({
+              success: false,
+              message: `Item ${processedItems.length + 1}: Monthly tenure must be one of: ${allowedMonthlyTenures.join(', ')} months`,
+              error: 'VALIDATION_ERROR'
+            });
+          }
+
+          // Validate that product supports monthly payment
+          if (!product.monthlyPaymentEnabled) {
+            return res.status(400).json({
+              success: false,
+              message: `Item ${processedItems.length + 1}: This product does not support monthly payment`,
+              error: 'VALIDATION_ERROR'
+            });
+          }
+
+          // Validate monthly price matches product monthly price
+          if (product.monthlyPrice !== item.monthlyPrice) {
+            return res.status(400).json({
+              success: false,
+              message: `Item ${processedItems.length + 1}: Monthly price mismatch with product. Expected ₹${product.monthlyPrice}, got ₹${item.monthlyPrice}`,
+              error: 'VALIDATION_ERROR'
+            });
+          }
+
+          // Set duration to monthlyTenure for consistency
+          duration = item.monthlyTenure;
+          // Calculate price: monthlyPrice * monthlyTenure
+          itemPrice = item.monthlyPrice * item.monthlyTenure;
+        } else {
+          // For regular payment, ensure monthly fields are null
+          item.isMonthlyPayment = false;
+          item.monthlyPrice = null;
+          item.monthlyTenure = null;
+
+          // Regular payment validation
+          if (!item.price) {
+            return res.status(400).json({
+              success: false,
+              message: 'Rental items require price for regular payment',
+              error: 'VALIDATION_ERROR'
+            });
+          }
+
+          // Validate duration - MUST be a number (3, 6, 9, 11, 12, or 24)
+          duration = item.duration;
+          if (duration === undefined || duration === null) {
+            duration = 3; // Default to 3 months
+          } else {
+            // Convert to number if string is provided
+            duration = typeof duration === 'string' ? parseInt(duration, 10) : duration;
+            if (isNaN(duration) || ![3, 6, 9, 11, 12, 24].includes(duration)) {
+              return res.status(400).json({
+                success: false,
+                message: `Item ${processedItems.length + 1}: Invalid duration. Must be 3, 6, 9, 11, 12, or 24 months`,
+                error: 'VALIDATION_ERROR'
+              });
+            }
+          }
+
+          // Validate that the product has a price for the selected duration
+          if (!product.price || !product.price[duration]) {
+            return res.status(400).json({
+              success: false,
+              message: `Price for selected duration (${duration} months) is not available for this product`,
+              error: 'PRICE_NOT_AVAILABLE'
+            });
+          }
+
+          itemPrice = item.price;
         }
 
         // Create product snapshot (for backward compatibility)
@@ -265,7 +338,9 @@ exports.createOrder = async (req, res, next) => {
           location: product.location,
           images: product.images,
           price: product.price,
-          installationCharges: product.installationCharges || null
+          installationCharges: product.installationCharges || null,
+          monthlyPaymentEnabled: product.monthlyPaymentEnabled || false,
+          monthlyPrice: product.monthlyPrice || null
         };
 
         // Use productDetails from frontend if provided, otherwise use snapshot
@@ -280,8 +355,8 @@ exports.createOrder = async (req, res, next) => {
 
         // If frontend provides installationCharges in item, use that (for flexibility)
         if (item.installationCharges !== undefined && item.installationCharges !== null) {
-          installationChargesAmount = typeof item.installationCharges === 'number' 
-            ? item.installationCharges 
+          installationChargesAmount = typeof item.installationCharges === 'number'
+            ? item.installationCharges
             : (item.installationCharges.amount || 0);
         }
 
@@ -292,8 +367,11 @@ exports.createOrder = async (req, res, next) => {
           productDetails: productDetails,
           deliveryInfo: deliveryInfo,
           quantity: item.quantity,
-          price: item.price,
+          price: itemPrice,
           duration: duration,
+          isMonthlyPayment: isMonthlyPayment,
+          monthlyPrice: isMonthlyPayment ? item.monthlyPrice : null,
+          monthlyTenure: isMonthlyPayment ? item.monthlyTenure : null,
           installationCharges: installationChargesAmount > 0 ? {
             amount: installationChargesAmount,
             includedItems: product.installationCharges?.includedItems || [],
@@ -306,7 +384,7 @@ exports.createOrder = async (req, res, next) => {
         });
 
         // Add rental price and installation charges to total
-        calculatedTotal += item.price;
+        calculatedTotal += itemPrice;
         if (installationChargesAmount > 0) {
           calculatedTotal += installationChargesAmount;
         }
@@ -372,9 +450,9 @@ exports.createOrder = async (req, res, next) => {
     let coupon = null;
     if (couponCode && couponCode.trim()) {
       // Find and validate coupon
-      coupon = await Coupon.findOne({ 
+      coupon = await Coupon.findOne({
         code: couponCode.trim().toUpperCase(),
-        isActive: true 
+        isActive: true
       });
 
       if (!coupon) {
@@ -434,7 +512,7 @@ exports.createOrder = async (req, res, next) => {
         const orderCategories = processedItems
           .filter(item => item.type === 'rental' && item.productDetails?.category)
           .map(item => item.productDetails.category);
-        
+
         const hasMatchingCategory = coupon.applicableCategories.some(category =>
           orderCategories.includes(category)
         );
@@ -453,7 +531,7 @@ exports.createOrder = async (req, res, next) => {
         const orderDurations = processedItems
           .filter(item => item.type === 'rental' && item.duration)
           .map(item => item.duration);
-        
+
         const hasMatchingDuration = coupon.applicableDurations.some(duration =>
           orderDurations.includes(duration)
         );
@@ -813,8 +891,8 @@ exports.cancelOrder = async (req, res, next) => {
 
     if (mongoose.Types.ObjectId.isValid(orderId)) {
       // Try finding by MongoDB _id
-      const orderQuery = userRole === 'admin' 
-        ? { _id: orderId } 
+      const orderQuery = userRole === 'admin'
+        ? { _id: orderId }
         : { _id: orderId, userId };
       order = await Order.findOne(orderQuery);
     }

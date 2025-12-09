@@ -181,6 +181,17 @@ const productSchema = new mongoose.Schema({
         min: 0
       }
     }
+  },
+  monthlyPaymentEnabled: {
+    type: Boolean,
+    default: false,
+    required: false
+  },
+  monthlyPrice: {
+    type: Number,
+    default: null,
+    required: false,
+    min: 0
   }
 }, {
   timestamps: true
@@ -257,6 +268,23 @@ productSchema.pre('save', function (next) {
       };
     }
   }
+  next();
+});
+
+// Validate monthly payment fields
+productSchema.pre('save', function (next) {
+  // If monthlyPaymentEnabled is true, monthlyPrice must be provided and > 0
+  if (this.monthlyPaymentEnabled === true) {
+    if (!this.monthlyPrice || this.monthlyPrice <= 0) {
+      return next(new Error('Monthly price is required and must be greater than 0 when monthly payment is enabled'));
+    }
+  }
+
+  // If monthlyPaymentEnabled is false, monthlyPrice should be null
+  if (this.monthlyPaymentEnabled === false) {
+    this.monthlyPrice = null;
+  }
+
   next();
 });
 

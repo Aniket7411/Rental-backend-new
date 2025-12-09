@@ -46,7 +46,7 @@ exports.getProducts = async (req, res, next) => {
       // Support comma-separated duration values (e.g., "3,6,12,24")
       const durationValues = duration.split(',').map(d => d.trim()).filter(d => d);
       const validDurations = ['3', '6', '9', '11', '12', '24'];
-      
+
       // Validate all provided durations are valid
       const invalidDurations = durationValues.filter(d => !validDurations.includes(d));
       if (invalidDurations.length > 0) {
@@ -208,7 +208,9 @@ exports.createProduct = async (req, res, next) => {
       operationType,
       loadType,
       status = 'Available',
-      installationCharges
+      installationCharges,
+      monthlyPaymentEnabled,
+      monthlyPrice
     } = req.body;
 
     // Validation
@@ -326,6 +328,26 @@ exports.createProduct = async (req, res, next) => {
       }
     }
 
+    // Validate monthly payment fields
+    if (monthlyPaymentEnabled === true) {
+      if (!monthlyPrice || monthlyPrice <= 0) {
+        return res.status(400).json({
+          success: false,
+          message: 'Monthly price is required and must be greater than 0 when monthly payment is enabled',
+          error: 'VALIDATION_ERROR'
+        });
+      }
+    }
+
+    // If monthlyPaymentEnabled is false, ensure monthlyPrice is null
+    if (monthlyPaymentEnabled === false && monthlyPrice !== null && monthlyPrice !== undefined) {
+      return res.status(400).json({
+        success: false,
+        message: 'Monthly price should be null when monthly payment is disabled',
+        error: 'VALIDATION_ERROR'
+      });
+    }
+
     const productData = {
       category,
       name,
@@ -341,7 +363,9 @@ exports.createProduct = async (req, res, next) => {
       energyRating,
       operationType,
       loadType,
-      status
+      status,
+      monthlyPaymentEnabled: monthlyPaymentEnabled || false,
+      monthlyPrice: monthlyPaymentEnabled === true ? monthlyPrice : null
     };
 
     // Only add installationCharges if category is AC
@@ -499,10 +523,46 @@ exports.updateProduct = async (req, res, next) => {
       }
     }
 
+    // Validate monthly payment fields if being updated
+    if (req.body.monthlyPaymentEnabled !== undefined) {
+      if (req.body.monthlyPaymentEnabled === true) {
+        if (!req.body.monthlyPrice || req.body.monthlyPrice <= 0) {
+          return res.status(400).json({
+            success: false,
+            message: 'Monthly price is required and must be greater than 0 when monthly payment is enabled',
+            error: 'VALIDATION_ERROR'
+          });
+        }
+        product.monthlyPaymentEnabled = true;
+        product.monthlyPrice = req.body.monthlyPrice;
+      } else {
+        product.monthlyPaymentEnabled = false;
+        product.monthlyPrice = null;
+      }
+    } else if (req.body.monthlyPrice !== undefined) {
+      // If only monthlyPrice is being updated, validate it
+      if (product.monthlyPaymentEnabled === true) {
+        if (!req.body.monthlyPrice || req.body.monthlyPrice <= 0) {
+          return res.status(400).json({
+            success: false,
+            message: 'Monthly price must be greater than 0 when monthly payment is enabled',
+            error: 'VALIDATION_ERROR'
+          });
+        }
+        product.monthlyPrice = req.body.monthlyPrice;
+      } else {
+        return res.status(400).json({
+          success: false,
+          message: 'Cannot set monthly price when monthly payment is disabled',
+          error: 'VALIDATION_ERROR'
+        });
+      }
+    }
+
     // Update other fields
     const updateFields = req.body;
     Object.keys(updateFields).forEach(key => {
-      if (key !== 'installationCharges' && updateFields[key] !== undefined) {
+      if (key !== 'installationCharges' && key !== 'monthlyPaymentEnabled' && key !== 'monthlyPrice' && updateFields[key] !== undefined) {
         product[key] = updateFields[key];
       }
     });

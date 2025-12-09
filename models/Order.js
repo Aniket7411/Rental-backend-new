@@ -44,8 +44,23 @@ const orderSchema = new mongoose.Schema({
     },
     duration: {
       type: Number,
-      enum: [3, 6, 9, 11, 12, 24]
+      enum: [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 18, 24]
       // Duration is required for rental items (validated in controller)
+      // For regular payments: 3, 6, 9, 11, 12, 24
+      // For monthly payments: 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 18, 24 (minimum 3 months)
+    },
+    isMonthlyPayment: {
+      type: Boolean,
+      default: false
+    },
+    monthlyPrice: {
+      type: Number,
+      default: null
+    },
+    monthlyTenure: {
+      type: Number,
+      default: null,
+      min: 3  // Minimum 3 months
     },
     // For service items
     serviceId: {
