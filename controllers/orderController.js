@@ -722,7 +722,8 @@ exports.createOrder = async (req, res, next) => {
       { path: 'userId', select: 'name email phone' }
     ]);
 
-    // Notify admin about new order
+    // Notify admin about new order (non-blocking - fire and forget)
+    // This prevents email timeout from blocking the API response
     const orderUser = order.userId || req.user;
     const subject = `New Order ${order.orderId} - ${orderStatus === 'confirmed' ? 'Confirmed' : 'Pending'}`;
     const messageText = `
@@ -743,7 +744,10 @@ exports.createOrder = async (req, res, next) => {
       Please check the admin panel for details.
     `;
 
-    await notifyAdmin(subject, messageText);
+    // Use non-blocking notification - don't await to prevent API timeout
+    notifyAdmin(subject, messageText).catch(error => {
+      console.error('Failed to send order notification email:', error);
+    });
 
     res.status(201).json({
       success: true,
@@ -960,7 +964,7 @@ exports.cancelOrder = async (req, res, next) => {
       { path: 'userId', select: 'name email phone' }
     ]);
 
-    // Notify admin about order cancellation
+    // Notify admin about order cancellation (non-blocking)
     const orderUser = order.userId;
     const subject = `Order ${order.orderId} Cancelled - ${cancelledBy === 'admin' ? 'By Admin' : 'By User'}`;
     const messageText = `
@@ -976,7 +980,10 @@ exports.cancelOrder = async (req, res, next) => {
       Please check the admin panel for details.
     `;
 
-    await notifyAdmin(subject, messageText);
+    // Use non-blocking notification - don't await to prevent API timeout
+    notifyAdmin(subject, messageText).catch(error => {
+      console.error('Failed to send cancellation notification email:', error);
+    });
 
     res.json({
       success: true,

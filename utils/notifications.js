@@ -22,14 +22,21 @@ const createTransporter = () => {
       tls: {
         // Do not fail on invalid certs
         rejectUnauthorized: false
-      }
+      },
+      connectionTimeout: 10000, // 10 seconds timeout for connection
+      greetingTimeout: 10000, // 10 seconds timeout for greeting
+      socketTimeout: 10000, // 10 seconds timeout for socket
+      // Add retry logic
+      pool: true,
+      maxConnections: 1,
+      maxMessages: 3
     });
   }
 
   return transporter;
 };
 
-// Send notification email to admin
+// Send notification email to admin (with timeout protection)
 exports.notifyAdmin = async (subject, message, html = null) => {
   try {
     const adminEmail = process.env.ADMIN_EMAIL || 'ashenterprises148@gmail.com';
@@ -48,12 +55,30 @@ exports.notifyAdmin = async (subject, message, html = null) => {
       html: html || message
     };
 
-    await emailTransporter.sendMail(mailOptions);
+    // Add timeout wrapper to prevent hanging
+    const sendEmailWithTimeout = async () => {
+      return Promise.race([
+        emailTransporter.sendMail(mailOptions),
+        new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Email send timeout after 10 seconds')), 10000)
+        )
+      ]);
+    };
+
+    await sendEmailWithTimeout();
     console.log('Notification email sent to admin');
   } catch (error) {
     console.error('Error sending notification email:', error);
     // Don't throw error - notification failure shouldn't break the main flow
   }
+};
+
+// Non-blocking version that runs in background (fire and forget)
+exports.notifyAdminAsync = (subject, message, html = null) => {
+  // Run in background without blocking
+  exports.notifyAdmin(subject, message, html).catch(error => {
+    console.error('Background email notification failed:', error);
+  });
 };
 
 // Notify admin about rental inquiry
