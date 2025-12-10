@@ -16,7 +16,7 @@ const transporter = nodemailer.createTransport({
 exports.notifyAdmin = async (subject, message, html = null) => {
   try {
     const adminEmail = process.env.ADMIN_EMAIL || 'admin@coolrentals.com';
-    
+
     const mailOptions = {
       from: process.env.EMAIL_FROM || process.env.EMAIL_USER,
       to: adminEmail,
@@ -51,7 +51,7 @@ exports.notifyRentalInquiry = async (inquiry) => {
     
     Please check the admin panel for details.
   `;
-  
+
   const html = `
     <h2>New Rental Inquiry Received</h2>
     <p><strong>Name:</strong> ${inquiry.name}</p>
@@ -61,7 +61,7 @@ exports.notifyRentalInquiry = async (inquiry) => {
     <p><strong>AC ID:</strong> ${inquiry.acId}</p>
     <p>Please check the admin panel for details.</p>
   `;
-  
+
   await exports.notifyAdmin(subject, message, html);
 };
 
@@ -84,7 +84,7 @@ exports.notifyServiceRequest = async (serviceRequest) => {
     
     Please check the admin panel for details.
   `;
-  
+
   const html = `
     <h2>New Service Request Received</h2>
     <p><strong>User:</strong> ${user.name || 'N/A'} (${user.email || 'N/A'})</p>
@@ -98,7 +98,7 @@ exports.notifyServiceRequest = async (serviceRequest) => {
     <p><strong>Preferred Time:</strong> ${serviceRequest.preferredTime || 'N/A'}</p>
     <p>Please check the admin panel for details.</p>
   `;
-  
+
   await exports.notifyAdmin(subject, message, html);
 };
 
@@ -115,7 +115,7 @@ exports.notifyLead = async (lead) => {
     
     Please contact the lead soon.
   `;
-  
+
   const html = `
     <h2>New Lead Captured</h2>
     <p><strong>Name:</strong> ${lead.name}</p>
@@ -124,8 +124,97 @@ exports.notifyLead = async (lead) => {
     <p><strong>Source:</strong> ${lead.source}</p>
     <p>Please contact the lead soon.</p>
   `;
-  
+
   await exports.notifyAdmin(subject, message, html);
+};
+// Send password reset email to user
+exports.sendPasswordResetEmail = async (email, resetUrl, userName = 'User') => {
+  try {
+    if (!process.env.EMAIL_USER || !process.env.EMAIL_PASSWORD) {
+      console.error('❌ Email credentials not configured.');
+      console.error('📧 Please set EMAIL_USER and EMAIL_PASSWORD in your .env file');
+      console.error('📝 See chnages/ENV_SETUP.md for instructions on setting up Gmail App Password');
+      throw new Error('Email service not configured. Please set EMAIL_USER and EMAIL_PASSWORD in .env file');
+    }
+
+    const subject = 'Password Reset Request - CoolRentals';
+
+    const text = `
+Hello ${userName},
+
+You requested to reset your password for your CoolRentals account.
+
+Click the following link to reset your password:
+${resetUrl}
+
+This link will expire in 10 minutes.
+
+If you did not request this password reset, please ignore this email and your password will remain unchanged.
+
+Best regards,
+CoolRentals Team
+    `;
+
+    const html = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Password Reset</title>
+</head>
+<body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
+  <div style="background-color: #f4f4f4; padding: 20px; border-radius: 5px;">
+    <h2 style="color: #2c3e50; margin-top: 0;">Password Reset Request</h2>
+    
+    <p>Hello ${userName},</p>
+    
+    <p>You requested to reset your password for your CoolRentals account.</p>
+    
+    <p style="margin: 30px 0;">
+      <a href="${resetUrl}" 
+         style="background-color: #3498db; color: white; padding: 12px 30px; text-decoration: none; border-radius: 5px; display: inline-block; font-weight: bold;">
+        Reset Password
+      </a>
+    </p>
+    
+    <p style="color: #7f8c8d; font-size: 14px;">
+      Or copy and paste this link into your browser:<br>
+      <a href="${resetUrl}" style="color: #3498db; word-break: break-all;">${resetUrl}</a>
+    </p>
+    
+    <p style="color: #e74c3c; font-size: 14px; font-weight: bold;">
+      ⚠️ This link will expire in 10 minutes.
+    </p>
+    
+    <p style="color: #7f8c8d; font-size: 14px; margin-top: 30px; padding-top: 20px; border-top: 1px solid #ddd;">
+      If you did not request this password reset, please ignore this email and your password will remain unchanged.
+    </p>
+    
+    <p style="margin-top: 30px;">
+      Best regards,<br>
+      <strong>CoolRentals Team</strong>
+    </p>
+  </div>
+</body>
+</html>
+    `;
+
+    const mailOptions = {
+      from: `"CoolRentals" <${process.env.EMAIL_FROM || process.env.EMAIL_USER}>`,
+      to: email,
+      subject: subject,
+      text: text,
+      html: html
+    };
+
+    await transporter.sendMail(mailOptions);
+    console.log(`Password reset email sent to ${email}`);
+    return true;
+  } catch (error) {
+    console.error('Error sending password reset email:', error);
+    throw error;
+  }
 };
 
 // SMS notification (placeholder - integrate with SMS service like Twilio)

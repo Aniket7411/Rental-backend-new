@@ -1,6 +1,7 @@
 const User = require('../models/User');
 const { generateToken } = require('../utils/jwt');
 const crypto = require('crypto');
+const { sendPasswordResetEmail } = require('../utils/notifications');
 
 // Unified Login (Auto-detect Admin/User)
 exports.login = async (req, res, next) => {
@@ -183,19 +184,29 @@ exports.forgotPassword = async (req, res, next) => {
     await user.save({ validateBeforeSave: false });
 
     // Send email with reset link
-    const resetUrl = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/reset-password?token=${resetToken}`;
+    const resetUrl = `${process.env.FRONTEND_URL || 'https://rental-ac-frontend.vercel.app'}/reset-password?token=${resetToken}`;
 
-    // In production, send email here
-    // For now, we'll just log it
-    console.log('Password reset link:', resetUrl);
-
-    // TODO: Send email using nodemailer
-    // await sendPasswordResetEmail(user.email, resetUrl);
-
-    res.json({
-      success: true,
-      message: 'Password reset link sent to your email'
-    });
+    try {
+      // Send password reset email
+      await sendPasswordResetEmail(user.email, resetUrl, user.name);
+      
+      res.json({
+        success: true,
+        message: 'Password reset link sent to your email'
+      });
+    } catch (emailError) {
+      // If email fails, clear the reset token
+      user.resetPasswordToken = undefined;
+      user.resetPasswordExpire = undefined;
+      await user.save({ validateBeforeSave: false });
+      
+      console.error('Error sending password reset email:', emailError);
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to send password reset email. Please try again later.',
+        error: 'EMAIL_ERROR'
+      });
+    }
   } catch (error) {
     next(error);
   }

@@ -58,7 +58,7 @@ exports.initiatePayment = async (req, res, next) => {
     // await payment.save();
 
     // For now, return mock payment link
-    const paymentLink = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/payment/${payment.paymentId}`;
+    const paymentLink = `${process.env.FRONTEND_URL || 'https://rental-ac-frontend.vercel.app'}/payment/${payment.paymentId}`;
 
     res.json({
       success: true,
