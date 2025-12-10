@@ -4,7 +4,7 @@ const paymentSchema = new mongoose.Schema({
   paymentId: {
     type: String,
     unique: true,
-    required: true,
+    required: false, // Auto-generated in pre-save hook
     index: true
   },
   orderId: {
