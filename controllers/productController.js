@@ -210,7 +210,8 @@ exports.createProduct = async (req, res, next) => {
       status = 'Available',
       installationCharges,
       monthlyPaymentEnabled,
-      monthlyPrice
+      monthlyPrice,
+      securityDeposit
     } = req.body;
 
     // Validation
@@ -337,15 +338,25 @@ exports.createProduct = async (req, res, next) => {
           error: 'VALIDATION_ERROR'
         });
       }
+      if (!securityDeposit || securityDeposit <= 0) {
+        return res.status(400).json({
+          success: false,
+          message: 'Security deposit is required and must be greater than 0 when monthly payment is enabled',
+          error: 'VALIDATION_ERROR'
+        });
+      }
     }
 
-    // If monthlyPaymentEnabled is false, ensure monthlyPrice is null
-    if (monthlyPaymentEnabled === false && monthlyPrice !== null && monthlyPrice !== undefined) {
-      return res.status(400).json({
-        success: false,
-        message: 'Monthly price should be null when monthly payment is disabled',
-        error: 'VALIDATION_ERROR'
-      });
+    // If monthlyPaymentEnabled is false, ensure monthlyPrice and securityDeposit are null/0
+    if (monthlyPaymentEnabled === false) {
+      if (monthlyPrice !== null && monthlyPrice !== undefined) {
+        return res.status(400).json({
+          success: false,
+          message: 'Monthly price should be null when monthly payment is disabled',
+          error: 'VALIDATION_ERROR'
+        });
+      }
+      securityDeposit = 0;
     }
 
     const productData = {
@@ -365,7 +376,8 @@ exports.createProduct = async (req, res, next) => {
       loadType,
       status,
       monthlyPaymentEnabled: monthlyPaymentEnabled || false,
-      monthlyPrice: monthlyPaymentEnabled === true ? monthlyPrice : null
+      monthlyPrice: monthlyPaymentEnabled === true ? monthlyPrice : null,
+      securityDeposit: monthlyPaymentEnabled === true ? (securityDeposit || 0) : 0
     };
 
     // Only add installationCharges if category is AC
@@ -533,36 +545,65 @@ exports.updateProduct = async (req, res, next) => {
             error: 'VALIDATION_ERROR'
           });
         }
-        product.monthlyPaymentEnabled = true;
-        product.monthlyPrice = req.body.monthlyPrice;
-      } else {
-        product.monthlyPaymentEnabled = false;
-        product.monthlyPrice = null;
-      }
-    } else if (req.body.monthlyPrice !== undefined) {
-      // If only monthlyPrice is being updated, validate it
-      if (product.monthlyPaymentEnabled === true) {
-        if (!req.body.monthlyPrice || req.body.monthlyPrice <= 0) {
+        if (!req.body.securityDeposit || req.body.securityDeposit <= 0) {
           return res.status(400).json({
             success: false,
-            message: 'Monthly price must be greater than 0 when monthly payment is enabled',
+            message: 'Security deposit is required and must be greater than 0 when monthly payment is enabled',
             error: 'VALIDATION_ERROR'
           });
         }
+        product.monthlyPaymentEnabled = true;
         product.monthlyPrice = req.body.monthlyPrice;
+        product.securityDeposit = req.body.securityDeposit;
       } else {
-        return res.status(400).json({
-          success: false,
-          message: 'Cannot set monthly price when monthly payment is disabled',
-          error: 'VALIDATION_ERROR'
-        });
+        product.monthlyPaymentEnabled = false;
+        product.monthlyPrice = null;
+        product.securityDeposit = 0;
+      }
+    } else {
+      // If monthlyPaymentEnabled is not being changed, validate individual fields
+      if (req.body.monthlyPrice !== undefined) {
+        // If only monthlyPrice is being updated, validate it
+        if (product.monthlyPaymentEnabled === true) {
+          if (!req.body.monthlyPrice || req.body.monthlyPrice <= 0) {
+            return res.status(400).json({
+              success: false,
+              message: 'Monthly price must be greater than 0 when monthly payment is enabled',
+              error: 'VALIDATION_ERROR'
+            });
+          }
+          product.monthlyPrice = req.body.monthlyPrice;
+        } else {
+          return res.status(400).json({
+            success: false,
+            message: 'Cannot set monthly price when monthly payment is disabled',
+            error: 'VALIDATION_ERROR'
+          });
+        }
+      }
+      
+      if (req.body.securityDeposit !== undefined) {
+        // If only securityDeposit is being updated, validate it
+        if (product.monthlyPaymentEnabled === true) {
+          if (!req.body.securityDeposit || req.body.securityDeposit <= 0) {
+            return res.status(400).json({
+              success: false,
+              message: 'Security deposit must be greater than 0 when monthly payment is enabled',
+              error: 'VALIDATION_ERROR'
+            });
+          }
+          product.securityDeposit = req.body.securityDeposit;
+        } else {
+          // If monthly payment is disabled, set securityDeposit to 0
+          product.securityDeposit = 0;
+        }
       }
     }
 
     // Update other fields
     const updateFields = req.body;
     Object.keys(updateFields).forEach(key => {
-      if (key !== 'installationCharges' && key !== 'monthlyPaymentEnabled' && key !== 'monthlyPrice' && updateFields[key] !== undefined) {
+      if (key !== 'installationCharges' && key !== 'monthlyPaymentEnabled' && key !== 'monthlyPrice' && key !== 'securityDeposit' && updateFields[key] !== undefined) {
         product[key] = updateFields[key];
       }
     });

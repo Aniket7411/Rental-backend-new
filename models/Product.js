@@ -192,6 +192,15 @@ const productSchema = new mongoose.Schema({
     default: null,
     required: false,
     min: 0
+  },
+  securityDeposit: {
+    type: Number,
+    default: 0,
+    min: 0,
+    // Required only if monthlyPaymentEnabled is true
+    required: function() {
+      return this.monthlyPaymentEnabled === true;
+    }
   }
 }, {
   timestamps: true
@@ -273,16 +282,20 @@ productSchema.pre('save', function (next) {
 
 // Validate monthly payment fields
 productSchema.pre('save', function (next) {
-  // If monthlyPaymentEnabled is true, monthlyPrice must be provided and > 0
+  // If monthlyPaymentEnabled is true, monthlyPrice and securityDeposit must be provided and > 0
   if (this.monthlyPaymentEnabled === true) {
     if (!this.monthlyPrice || this.monthlyPrice <= 0) {
       return next(new Error('Monthly price is required and must be greater than 0 when monthly payment is enabled'));
     }
+    if (!this.securityDeposit || this.securityDeposit <= 0) {
+      return next(new Error('Security deposit is required and must be greater than 0 when monthly payment is enabled'));
+    }
   }
 
-  // If monthlyPaymentEnabled is false, monthlyPrice should be null
+  // If monthlyPaymentEnabled is false, monthlyPrice and securityDeposit should be 0 or null
   if (this.monthlyPaymentEnabled === false) {
     this.monthlyPrice = null;
+    this.securityDeposit = 0;
   }
 
   next();

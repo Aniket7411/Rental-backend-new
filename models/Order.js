@@ -44,10 +44,9 @@ const orderSchema = new mongoose.Schema({
     },
     duration: {
       type: Number,
-      enum: [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 18, 24]
+      enum: [3, 6, 9, 11, 12, 24]
       // Duration is required for rental items (validated in controller)
-      // For regular payments: 3, 6, 9, 11, 12, 24
-      // For monthly payments: 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 18, 24 (minimum 3 months)
+      // Valid values: 3, 6, 9, 11, 12, 24 months (same for both payment types)
     },
     isMonthlyPayment: {
       type: Boolean,
@@ -60,7 +59,22 @@ const orderSchema = new mongoose.Schema({
     monthlyTenure: {
       type: Number,
       default: null,
-      min: 3  // Minimum 3 months
+      // Valid values: 3, 6, 9, 11, 12, 24
+      enum: [3, 6, 9, 11, 12, 24],
+      validate: {
+        validator: function(value) {
+          if (this.isMonthlyPayment) {
+            return [3, 6, 9, 11, 12, 24].includes(value);
+          }
+          return true;
+        },
+        message: 'Monthly tenure must be one of: 3, 6, 9, 11, 12, 24 months'
+      }
+    },
+    securityDeposit: {
+      type: Number,
+      default: null,
+      min: 0
     },
     // For service items
     serviceId: {

@@ -253,11 +253,20 @@ exports.createOrder = async (req, res, next) => {
           }
 
           // Validate monthlyTenure is one of the allowed values
-          const allowedMonthlyTenures = [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 18, 24];
+          const allowedMonthlyTenures = [3, 6, 9, 11, 12, 24];
           if (!allowedMonthlyTenures.includes(item.monthlyTenure)) {
             return res.status(400).json({
               success: false,
               message: `Item ${processedItems.length + 1}: Monthly tenure must be one of: ${allowedMonthlyTenures.join(', ')} months`,
+              error: 'VALIDATION_ERROR'
+            });
+          }
+
+          // Validate security deposit is provided and > 0
+          if (!item.securityDeposit || item.securityDeposit <= 0) {
+            return res.status(400).json({
+              success: false,
+              message: `Item ${processedItems.length + 1}: Security deposit is required and must be greater than 0 for monthly payment`,
               error: 'VALIDATION_ERROR'
             });
           }
@@ -280,15 +289,25 @@ exports.createOrder = async (req, res, next) => {
             });
           }
 
+          // Validate security deposit matches product security deposit
+          if (product.securityDeposit !== item.securityDeposit) {
+            return res.status(400).json({
+              success: false,
+              message: `Item ${processedItems.length + 1}: Security deposit mismatch with product. Expected ₹${product.securityDeposit}, got ₹${item.securityDeposit}`,
+              error: 'VALIDATION_ERROR'
+            });
+          }
+
           // Set duration to monthlyTenure for consistency
           duration = item.monthlyTenure;
-          // Calculate price: monthlyPrice * monthlyTenure
-          itemPrice = item.monthlyPrice * item.monthlyTenure;
+          // Calculate upfront payment: monthlyPrice + securityDeposit (NOT monthlyPrice * monthlyTenure)
+          itemPrice = item.monthlyPrice + item.securityDeposit;
         } else {
           // For regular payment, ensure monthly fields are null
           item.isMonthlyPayment = false;
           item.monthlyPrice = null;
           item.monthlyTenure = null;
+          item.securityDeposit = null;
 
           // Regular payment validation
           if (!item.price) {
@@ -340,7 +359,8 @@ exports.createOrder = async (req, res, next) => {
           price: product.price,
           installationCharges: product.installationCharges || null,
           monthlyPaymentEnabled: product.monthlyPaymentEnabled || false,
-          monthlyPrice: product.monthlyPrice || null
+          monthlyPrice: product.monthlyPrice || null,
+          securityDeposit: product.securityDeposit || 0
         };
 
         // Use productDetails from frontend if provided, otherwise use snapshot
@@ -372,6 +392,7 @@ exports.createOrder = async (req, res, next) => {
           isMonthlyPayment: isMonthlyPayment,
           monthlyPrice: isMonthlyPayment ? item.monthlyPrice : null,
           monthlyTenure: isMonthlyPayment ? item.monthlyTenure : null,
+          securityDeposit: isMonthlyPayment ? item.securityDeposit : null,
           installationCharges: installationChargesAmount > 0 ? {
             amount: installationChargesAmount,
             includedItems: product.installationCharges?.includedItems || [],
