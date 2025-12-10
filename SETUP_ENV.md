@@ -38,6 +38,9 @@ EMAIL_USER=ashenterprises148@gmail.com
 EMAIL_PASSWORD=PASTE_YOUR_APP_PASSWORD_HERE
 EMAIL_FROM=ashenterprises148@gmail.com
 ADMIN_EMAIL=admin@coolrentals.com
+
+# CORS Configuration (optional - for multiple frontend origins)
+# CORS_ORIGINS=https://rental-ac-frontend.vercel.app,http://localhost:3000
 ```
 
 ### Step 3: Get Gmail App Password

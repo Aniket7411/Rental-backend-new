@@ -8,6 +8,10 @@ PORT=5000
 BASE_URL=http://localhost:5000
 FRONTEND_URL=https://rental-ac-frontend.vercel.app
 
+# CORS Configuration (optional - comma-separated list of allowed origins)
+# If not set, will use FRONTEND_URL. In development, localhost is automatically allowed.
+# CORS_ORIGINS=https://rental-ac-frontend.vercel.app,http://localhost:3000
+
 # MongoDB Configuration
 MONGODB_URI=mongodb://localhost:27017/coolrentals
 
@@ -38,6 +42,7 @@ ADMIN_EMAIL=admin@coolrentals.com
 
 1. **JWT_SECRET**: Change this to a strong, random string in production
 2. **MONGODB_URI**: Update this to your MongoDB connection string (local or cloud)
+3. **CORS_ORIGINS**: Optional - comma-separated list of allowed frontend origins. If not set, uses FRONTEND_URL. In development mode, localhost is automatically allowed.
 3. **EMAIL_***: 
    - **EMAIL_USER**: Your Gmail address (ashenterprises148@gmail.com)
    - **EMAIL_PASSWORD**: Your Gmail App Password (NOT your regular Gmail password)

@@ -42,13 +42,46 @@ const parseOrigins = (value) => {
   if (!value) return null;
   return value.split(',').map(o => o.trim()).filter(Boolean);
 };
-const allowedOrigins = parseOrigins(process.env.CORS_ORIGINS) || parseOrigins(process.env.FRONTEND_URL);
+
+// Build allowed origins list
+let allowedOrigins = parseOrigins(process.env.CORS_ORIGINS) || parseOrigins(process.env.FRONTEND_URL);
+
+// Add common development origins if in development mode
+if (process.env.NODE_ENV !== 'production') {
+  const devOrigins = ['http://localhost:3000', 'http://localhost:3001', 'http://127.0.0.1:3000'];
+  if (allowedOrigins) {
+    allowedOrigins = [...allowedOrigins, ...devOrigins];
+  } else {
+    allowedOrigins = devOrigins;
+  }
+}
+
+// Always allow production frontend
+if (allowedOrigins && !allowedOrigins.includes('https://rental-ac-frontend.vercel.app')) {
+  allowedOrigins.push('https://rental-ac-frontend.vercel.app');
+}
+
 app.use(cors({
   origin: (origin, callback) => {
-    if (!origin) return callback(null, true); // server-to-server or same-origin
-    if (!allowedOrigins) return callback(null, true); // allow all if not specified
-    if (allowedOrigins.includes(origin)) return callback(null, true);
-    return callback(new Error('Not allowed by CORS'));
+    // Allow requests with no origin (like mobile apps, Postman, curl)
+    if (!origin) return callback(null, true);
+
+    // If no allowed origins specified, allow all (development mode)
+    if (!allowedOrigins || allowedOrigins.length === 0) {
+      return callback(null, true);
+    }
+
+    // Check if origin is in allowed list
+    if (allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
+
+    // Log the blocked origin for debugging
+    console.warn(`CORS blocked origin: ${origin}`);
+    console.warn(`Allowed origins: ${allowedOrigins.join(', ')}`);
+
+    // Reject the request
+    callback(new Error('Not allowed by CORS'));
   },
   methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
