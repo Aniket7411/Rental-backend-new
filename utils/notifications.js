@@ -21,7 +21,7 @@ const transporter = nodemailer.createTransport({
 // Send notification email to admin
 exports.notifyAdmin = async (subject, message, html = null) => {
   try {
-    const adminEmail = process.env.ADMIN_EMAIL || 'admin@coolrentals.com';
+    const adminEmail = process.env.ADMIN_EMAIL || 'ashenterprises148@gmail.com';
 
     const mailOptions = {
       from: process.env.EMAIL_FROM || process.env.EMAIL_USER,
