@@ -4,12 +4,18 @@ const nodemailer = require('nodemailer');
 // Update with your email service credentials
 const transporter = nodemailer.createTransport({
   host: process.env.EMAIL_HOST || 'smtp.gmail.com',
-  port: process.env.EMAIL_PORT || 587,
-  secure: false,
+  port: parseInt(process.env.EMAIL_PORT) || 587,
+  secure: false, // true for 465, false for other ports
   auth: {
     user: process.env.EMAIL_USER,
     pass: process.env.EMAIL_PASSWORD
-  }
+  },
+  tls: {
+    rejectUnauthorized: false // Allow self-signed certificates
+  },
+  connectionTimeout: 10000, // 10 seconds
+  greetingTimeout: 10000,
+  socketTimeout: 10000
 });
 
 // Send notification email to admin
@@ -208,11 +214,29 @@ CoolRentals Team
       html: html
     };
 
+    // Verify transporter configuration
+    await transporter.verify();
+    console.log('✅ Email transporter verified successfully');
+
     await transporter.sendMail(mailOptions);
-    console.log(`Password reset email sent to ${email}`);
+    console.log(`✅ Password reset email sent to ${email}`);
     return true;
   } catch (error) {
-    console.error('Error sending password reset email:', error);
+    console.error('❌ Error sending password reset email:');
+    console.error('Error message:', error.message);
+    console.error('Error code:', error.code);
+    console.error('Error response:', error.response);
+    console.error('Error responseCode:', error.responseCode);
+
+    // More detailed error information
+    if (error.code === 'EAUTH') {
+      console.error('🔐 Authentication failed. Check EMAIL_USER and EMAIL_PASSWORD');
+    } else if (error.code === 'ECONNECTION') {
+      console.error('🌐 Connection failed. Check network and SMTP settings');
+    } else if (error.code === 'ETIMEDOUT') {
+      console.error('⏱️ Connection timeout. Check EMAIL_HOST and EMAIL_PORT');
+    }
+
     throw error;
   }
 };
