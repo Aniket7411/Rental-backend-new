@@ -165,12 +165,12 @@ exports.sendPasswordResetEmail = async (email, resetUrl, userName = 'User') => {
       throw new Error('Failed to create email transporter. Check email credentials.');
     }
 
-    const subject = 'Password Reset Request - CoolRentals';
+    const subject = 'Password Reset Request - ASH Enterprises';
 
     const text = `
 Hello ${userName},
 
-You requested to reset your password for your CoolRentals account.
+You requested to reset your password for your ASH Enterprises account.
 
 Click the following link to reset your password:
 ${resetUrl}
@@ -180,7 +180,7 @@ This link will expire in 10 minutes.
 If you did not request this password reset, please ignore this email and your password will remain unchanged.
 
 Best regards,
-CoolRentals Team
+ASH Enterprises Team
     `;
 
     const html = `
@@ -197,7 +197,7 @@ CoolRentals Team
     
     <p>Hello ${userName},</p>
     
-    <p>You requested to reset your password for your CoolRentals account.</p>
+    <p>You requested to reset your password for your ASH Enterprises account.</p>
     
     <p style="margin: 30px 0;">
       <a href="${resetUrl}" 
@@ -221,7 +221,7 @@ CoolRentals Team
     
     <p style="margin-top: 30px;">
       Best regards,<br>
-      <strong>CoolRentals Team</strong>
+      <strong>ASH Enterprises Team</strong>
     </p>
   </div>
 </body>
@@ -229,7 +229,7 @@ CoolRentals Team
     `;
 
     const mailOptions = {
-      from: `"CoolRentals" <${process.env.EMAIL_FROM || process.env.EMAIL_USER}>`,
+      from: `"ASH Enterprises" <${process.env.EMAIL_FROM || process.env.EMAIL_USER}>`,
       to: email,
       subject: subject,
       text: text,

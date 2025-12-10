@@ -376,7 +376,7 @@ const PaymentCheckout = ({ orderId, amount, onPaymentSuccess, onPaymentFailure, 
         key: orderData.key || process.env.REACT_APP_RAZORPAY_KEY_ID,
         amount: Math.round(orderData.amount * 100), // Convert to paise
         currency: orderData.currency || 'INR',
-        name: 'CoolRentals & Services',
+        name: 'ASH Enterprises',
         description: `Payment for Order ${orderData.orderId}`,
         order_id: orderData.razorpayOrderId,
         handler: async function (response) {

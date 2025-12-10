@@ -1,6 +1,6 @@
-# CoolRentals & Services Backend API
+# ASH Enterprises Backend API
 
-Backend API for CoolRentals & Services - AC Rental and Service Management System.
+Backend API for ASH Enterprises - AC Rental and Service Management System.
 
 ## Features
 
