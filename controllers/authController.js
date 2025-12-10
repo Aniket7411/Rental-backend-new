@@ -200,11 +200,20 @@ exports.forgotPassword = async (req, res, next) => {
       user.resetPasswordExpire = undefined;
       await user.save({ validateBeforeSave: false });
       
-      console.error('Error sending password reset email:', emailError);
+      // Log detailed error information
+      console.error('❌ Error sending password reset email:');
+      console.error('Error message:', emailError.message);
+      console.error('Error stack:', emailError.stack);
+      
+      // Return error response
       return res.status(500).json({
         success: false,
         message: 'Failed to send password reset email. Please try again later.',
-        error: 'EMAIL_ERROR'
+        error: 'EMAIL_ERROR',
+        // Include error details in development mode
+        ...(process.env.NODE_ENV === 'development' && {
+          details: emailError.message
+        })
       });
     }
   } catch (error) {

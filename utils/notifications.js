@@ -2,20 +2,43 @@ const nodemailer = require('nodemailer');
 
 // Configure email transporter
 // Update with your email service credentials
-const transporter = nodemailer.createTransport({
-  host: process.env.EMAIL_HOST || 'smtp.gmail.com',
-  port: process.env.EMAIL_PORT || 587,
-  secure: false,
-  auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASSWORD
+let transporter = null;
+
+// Create transporter only if credentials are available
+const createTransporter = () => {
+  if (!process.env.EMAIL_USER || !process.env.EMAIL_PASSWORD) {
+    return null;
   }
-});
+
+  if (!transporter) {
+    transporter = nodemailer.createTransport({
+      host: process.env.EMAIL_HOST || 'smtp.gmail.com',
+      port: parseInt(process.env.EMAIL_PORT || '587'),
+      secure: false, // true for 465, false for other ports
+      auth: {
+        user: process.env.EMAIL_USER,
+        pass: process.env.EMAIL_PASSWORD
+      },
+      tls: {
+        // Do not fail on invalid certs
+        rejectUnauthorized: false
+      }
+    });
+  }
+
+  return transporter;
+};
 
 // Send notification email to admin
 exports.notifyAdmin = async (subject, message, html = null) => {
   try {
-    const adminEmail = process.env.ADMIN_EMAIL || 'admin@coolrentals.com';
+    const adminEmail = process.env.ADMIN_EMAIL || 'ashenterprises148@gmail.com';
+
+    const emailTransporter = createTransporter();
+    if (!emailTransporter) {
+      console.log('Email not configured. Notification:', subject, message);
+      return;
+    }
 
     const mailOptions = {
       from: process.env.EMAIL_FROM || process.env.EMAIL_USER,
@@ -25,12 +48,8 @@ exports.notifyAdmin = async (subject, message, html = null) => {
       html: html || message
     };
 
-    if (process.env.EMAIL_USER && process.env.EMAIL_PASSWORD) {
-      await transporter.sendMail(mailOptions);
-      console.log('Notification email sent to admin');
-    } else {
-      console.log('Email not configured. Notification:', subject, message);
-    }
+    await emailTransporter.sendMail(mailOptions);
+    console.log('Notification email sent to admin');
   } catch (error) {
     console.error('Error sending notification email:', error);
     // Don't throw error - notification failure shouldn't break the main flow
@@ -130,11 +149,20 @@ exports.notifyLead = async (lead) => {
 // Send password reset email to user
 exports.sendPasswordResetEmail = async (email, resetUrl, userName = 'User') => {
   try {
+    // Check if email credentials are configured
     if (!process.env.EMAIL_USER || !process.env.EMAIL_PASSWORD) {
+      const errorMsg = 'Email service not configured. Please set EMAIL_USER and EMAIL_PASSWORD in environment variables';
       console.error('❌ Email credentials not configured.');
-      console.error('📧 Please set EMAIL_USER and EMAIL_PASSWORD in your .env file');
+      console.error('📧 EMAIL_USER:', process.env.EMAIL_USER ? 'Set' : 'NOT SET');
+      console.error('📧 EMAIL_PASSWORD:', process.env.EMAIL_PASSWORD ? 'Set' : 'NOT SET');
       console.error('📝 See chnages/ENV_SETUP.md for instructions on setting up Gmail App Password');
-      throw new Error('Email service not configured. Please set EMAIL_USER and EMAIL_PASSWORD in .env file');
+      throw new Error(errorMsg);
+    }
+
+    // Create/get transporter
+    const emailTransporter = createTransporter();
+    if (!emailTransporter) {
+      throw new Error('Failed to create email transporter. Check email credentials.');
     }
 
     const subject = 'Password Reset Request - CoolRentals';
@@ -208,12 +236,38 @@ CoolRentals Team
       html: html
     };
 
-    await transporter.sendMail(mailOptions);
-    console.log(`Password reset email sent to ${email}`);
+    // Verify transporter connection before sending
+    try {
+      await emailTransporter.verify();
+      console.log('✅ Email transporter verified successfully');
+    } catch (verifyError) {
+      console.error('❌ Email transporter verification failed:', verifyError.message);
+      console.error('Full error:', verifyError);
+      throw new Error(`Email service connection failed: ${verifyError.message}`);
+    }
+
+    // Send the email
+    const info = await emailTransporter.sendMail(mailOptions);
+    console.log(`✅ Password reset email sent to ${email}`);
+    console.log('Email message ID:', info.messageId);
     return true;
   } catch (error) {
-    console.error('Error sending password reset email:', error);
-    throw error;
+    console.error('❌ Error sending password reset email:');
+    console.error('Error message:', error.message);
+    console.error('Error code:', error.code);
+    console.error('Error response:', error.response);
+    console.error('Full error:', error);
+
+    // Provide more specific error messages
+    if (error.code === 'EAUTH') {
+      throw new Error('Email authentication failed. Please check EMAIL_USER and EMAIL_PASSWORD.');
+    } else if (error.code === 'ECONNECTION') {
+      throw new Error('Failed to connect to email server. Check EMAIL_HOST and EMAIL_PORT.');
+    } else if (error.message.includes('not configured')) {
+      throw error;
+    } else {
+      throw new Error(`Email sending failed: ${error.message}`);
+    }
   }
 };
 
