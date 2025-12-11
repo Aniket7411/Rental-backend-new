@@ -14,6 +14,13 @@ const leadSchema = new mongoose.Schema({
     match: [/^\+91[0-9]{10}$/, 'Phone number must be 10 digits with +91 prefix'],
     trim: true
   },
+  email: {
+    type: String,
+    trim: true,
+    lowercase: true,
+    match: [/^\S+@\S+\.\S+$/, 'Please provide a valid email'],
+    default: ''
+  },
   interest: {
     type: String,
     required: [true, 'Interest type is required'],
@@ -38,7 +45,7 @@ const leadSchema = new mongoose.Schema({
   notes: {
     type: String,
     maxlength: [1000, 'Notes cannot exceed 1000 characters'],
-    default: null
+    default: ''
   },
   contactedAt: {
     type: Date,

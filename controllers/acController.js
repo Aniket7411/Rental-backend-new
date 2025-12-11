@@ -317,7 +317,7 @@ exports.deleteAC = async (req, res, next) => {
 // Create rental inquiry (called from routes)
 exports.createRentalInquiry = async (req, res, next) => {
   try {
-    const { name, email, phone, message, acId, acDetails, productId } = req.body;
+    const { name, email, phone, message, acId, acDetails, productId, preferredDuration, address } = req.body;
     const { id } = req.params;
 
     // Support both productId and acId for backward compatibility
@@ -349,8 +349,8 @@ exports.createRentalInquiry = async (req, res, next) => {
     // Determine product category
     const productCategory = product.category || 'AC';
 
-    // Get duration from request body (API uses duration)
-    const duration = req.body.duration || 'Monthly';
+    // Get duration from request body (API uses preferredDuration or duration)
+    const duration = preferredDuration || req.body.duration || 'Monthly';
 
     // Create inquiry
     const inquiry = await RentalInquiry.create({
@@ -377,9 +377,10 @@ exports.createRentalInquiry = async (req, res, next) => {
         name: inquiry.name,
         email: inquiry.email,
         phone: inquiry.phone,
-        duration: inquiry.duration,
+        preferredDuration: inquiry.duration, // API uses preferredDuration
         message: inquiry.message,
-        status: inquiry.status,
+        address: address || '', // Include address if provided
+        status: inquiry.status.toLowerCase(), // Return lowercase status
         createdAt: inquiry.createdAt
       }
     });

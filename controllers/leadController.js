@@ -1,16 +1,59 @@
 const Lead = require('../models/Lead');
 const { notifyLead } = require('../utils/notifications');
 
+// Helper function to map frontend source to backend source
+const mapSource = (source) => {
+  const sourceMap = {
+    'website': 'browse',
+    'callback': 'contact',
+    'contact_form': 'contact'
+  };
+  return sourceMap[source] || source || 'browse';
+};
+
+// Helper function to normalize status (accept both lowercase and capitalized)
+const normalizeStatus = (status) => {
+  if (!status) return 'New';
+  const statusMap = {
+    'new': 'New',
+    'contacted': 'Contacted',
+    'converted': 'Resolved', // Map converted to Resolved
+    'closed': 'Closed',
+    'in-progress': 'In-Progress'
+  };
+  return statusMap[status.toLowerCase()] || status;
+};
+
+// Helper function to format status for response (convert to lowercase for frontend)
+const formatStatus = (status) => {
+  const statusMap = {
+    'New': 'new',
+    'Contacted': 'contacted',
+    'Resolved': 'converted',
+    'Closed': 'closed',
+    'In-Progress': 'contacted' // Map In-Progress to contacted for frontend
+  };
+  return statusMap[status] || status.toLowerCase();
+};
+
 // Create lead (Public)
 exports.createLead = async (req, res, next) => {
   try {
-    const { name, phone, interest, source } = req.body;
+    const { name, phone, email, message, source, interest } = req.body;
+
+    // Map source from documentation format to backend format
+    const backendSource = mapSource(source);
+    
+    // Determine interest from source if not provided
+    const backendInterest = interest || (source === 'callback' ? 'rental' : 'service');
 
     const lead = await Lead.create({
       name,
       phone,
-      interest,
-      source,
+      email: email || '', // Store email if provided
+      interest: backendInterest,
+      source: backendSource,
+      notes: message || '', // Store message in notes field
       status: 'New'
     });
 
@@ -29,9 +72,10 @@ exports.createLead = async (req, res, next) => {
         _id: lead._id,
         name: lead.name,
         phone: lead.phone,
-        interest: lead.interest,
-        source: lead.source,
-        status: lead.status,
+        email: lead.email || '',
+        message: lead.notes || '',
+        source: source || lead.source, // Return original source format
+        status: formatStatus(lead.status),
         createdAt: lead.createdAt,
         updatedAt: lead.updatedAt
       }
@@ -84,6 +128,11 @@ exports.getAllLeads = async (req, res, next) => {
     // Calculate skip
     const skip = (pageNum - 1) * limitNum;
 
+    // Normalize status filter if provided
+    if (filter.status) {
+      filter.status = normalizeStatus(filter.status);
+    }
+
     // Execute query
     const [leads, totalLeads] = await Promise.all([
       Lead.find(filter)
@@ -94,18 +143,24 @@ exports.getAllLeads = async (req, res, next) => {
       Lead.countDocuments(filter)
     ]);
 
+    // Format leads for response (convert status to lowercase)
+    const formattedLeads = leads.map(lead => ({
+      ...lead,
+      status: formatStatus(lead.status),
+      message: lead.notes || '',
+      email: lead.email || ''
+    }));
+
     // Calculate pagination info
     const totalPages = Math.ceil(totalLeads / limitNum);
 
     res.status(200).json({
       success: true,
-      data: leads,
+      data: formattedLeads,
       pagination: {
-        currentPage: pageNum,
-        totalPages,
-        totalLeads,
-        hasNext: pageNum < totalPages,
-        hasPrev: pageNum > 1
+        page: pageNum,
+        limit: limitNum,
+        total: totalLeads
       }
     });
   } catch (error) {
@@ -162,7 +217,7 @@ exports.updateLeadStatus = async (req, res, next) => {
 
     // Update fields
     if (status !== undefined) {
-      lead.status = status;
+      lead.status = normalizeStatus(status);
     }
     if (notes !== undefined) {
       lead.notes = notes;
@@ -170,12 +225,12 @@ exports.updateLeadStatus = async (req, res, next) => {
 
     // Auto-timestamp logic
     // When status changes to 'Contacted' and contactedAt is null, set it
-    if (status === 'Contacted' && previousStatus !== 'Contacted' && !lead.contactedAt) {
+    if (lead.status === 'Contacted' && previousStatus !== 'Contacted' && !lead.contactedAt) {
       lead.contactedAt = new Date();
     }
 
     // When status changes to 'Resolved' or 'Closed' and resolvedAt is null, set it
-    if ((status === 'Resolved' || status === 'Closed') && 
+    if ((lead.status === 'Resolved' || lead.status === 'Closed') && 
         previousStatus !== 'Resolved' && previousStatus !== 'Closed' && 
         !lead.resolvedAt) {
       lead.resolvedAt = new Date();
@@ -183,10 +238,16 @@ exports.updateLeadStatus = async (req, res, next) => {
 
     await lead.save();
 
+    // Format response
+    const formattedLead = lead.toObject();
+    formattedLead.status = formatStatus(formattedLead.status);
+    formattedLead.message = formattedLead.notes || '';
+    formattedLead.email = formattedLead.email || '';
+
     res.status(200).json({
       success: true,
       message: 'Lead updated successfully',
-      data: lead
+      data: formattedLead
     });
   } catch (error) {
     if (error.name === 'CastError') {
@@ -323,16 +384,22 @@ exports.getLeadStats = async (req, res, next) => {
       createdAt: { $gte: monthAgo }
     });
 
+    // Format status map for frontend (convert to lowercase)
+    const formattedStatusMap = {
+      new: statusMap['New'] || 0,
+      contacted: (statusMap['Contacted'] || 0) + (statusMap['In-Progress'] || 0),
+      converted: statusMap['Resolved'] || 0,
+      closed: statusMap['Closed'] || 0
+    };
+
     res.status(200).json({
       success: true,
       data: {
         total,
-        byStatus: statusMap,
-        byInterest: interestMap,
-        bySource: sourceMap,
-        newToday,
-        newThisWeek,
-        newThisMonth
+        new: formattedStatusMap.new,
+        contacted: formattedStatusMap.contacted,
+        converted: formattedStatusMap.converted,
+        closed: formattedStatusMap.closed
       }
     });
   } catch (error) {
