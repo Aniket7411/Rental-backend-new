@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const { SERVICE_CATEGORIES } = require('../utils/serviceConstants');
 
 const serviceSchema = new mongoose.Schema({
   title: {
@@ -44,6 +45,13 @@ const serviceSchema = new mongoose.Schema({
   recommendedFrequency: {
     type: String,
     trim: true
+  },
+  category: {
+    type: String,
+    enum: SERVICE_CATEGORIES,
+    required: false, // Optional for backward compatibility
+    index: true, // For efficient filtering
+    default: null // Default to null for uncategorized services
   }
 }, {
   timestamps: true

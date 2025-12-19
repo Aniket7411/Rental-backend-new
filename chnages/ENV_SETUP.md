@@ -32,10 +32,10 @@ ADMIN_EMAIL=admin@coolrentals.com
 # CLOUDINARY_API_KEY=your-api-key
 # CLOUDINARY_API_SECRET=your-api-secret
 
-# Twilio Configuration (optional - for SMS notifications)
-# TWILIO_ACCOUNT_SID=your-account-sid
-# TWILIO_AUTH_TOKEN=your-auth-token
-# TWILIO_PHONE_NUMBER=your-phone-number
+# Twilio Configuration (REQUIRED - for OTP-based authentication)
+TWILIO_ACCOUNT_SID=your-account-sid
+TWILIO_AUTH_TOKEN=your-auth-token
+TWILIO_PHONE_NUMBER=your-phone-number
 ```
 
 ## Important Notes
@@ -54,7 +54,17 @@ ADMIN_EMAIL=admin@coolrentals.com
      5. Copy the 16-character password and paste it in EMAIL_PASSWORD
    - **EMAIL_FROM**: The email address that will appear as the sender (usually same as EMAIL_USER)
 4. **CLOUDINARY_***: Optional - only needed if using Cloudinary for image storage
-5. **TWILIO_***: Optional - only needed if using Twilio for SMS notifications
+5. **TWILIO_***: **REQUIRED** - Needed for OTP-based phone authentication
+   - **TWILIO_ACCOUNT_SID**: Your Twilio Account SID (found in Twilio Console)
+   - **TWILIO_AUTH_TOKEN**: Your Twilio Auth Token (found in Twilio Console)
+   - **TWILIO_PHONE_NUMBER**: Your Twilio phone number (format: +1234567890)
+   - **How to get Twilio credentials:**
+     1. Sign up for a Twilio account at https://www.twilio.com
+     2. Go to the Twilio Console Dashboard
+     3. Find your Account SID and Auth Token
+     4. Get a phone number from Twilio (or use your existing one)
+     5. Add these credentials to your `.env` file
+   - **Note**: In development mode, if Twilio is not configured, OTPs will be logged to console
 
 ## Creating Admin User
 

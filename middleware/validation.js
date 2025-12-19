@@ -290,6 +290,10 @@ exports.validateService = [
     .optional()
     .isString()
     .withMessage('Each key feature must be a string'),
+  body('category')
+    .optional()
+    .isIn(require('../utils/serviceConstants').SERVICE_CATEGORIES)
+    .withMessage(`Category must be one of: ${require('../utils/serviceConstants').SERVICE_CATEGORIES.join(', ')}`),
   handleValidationErrors
 ];
 

@@ -1,0 +1,94 @@
+const twilio = require('twilio');
+
+// Initialize Twilio client
+let twilioClient = null;
+
+const initializeTwilio = () => {
+  const accountSid = process.env.TWILIO_ACCOUNT_SID;
+  const authToken = process.env.TWILIO_AUTH_TOKEN;
+
+  if (!accountSid || !authToken) {
+    console.warn('⚠️  Twilio credentials not found. OTP functionality will be disabled.');
+    return null;
+  }
+
+  try {
+    twilioClient = twilio(accountSid, authToken);
+    console.log('✅ Twilio client initialized successfully');
+    return twilioClient;
+  } catch (error) {
+    console.error('❌ Error initializing Twilio client:', error.message);
+    return null;
+  }
+};
+
+// Initialize on module load
+if (!twilioClient) {
+  initializeTwilio();
+}
+
+/**
+ * Send OTP via SMS using Twilio
+ * @param {string} phoneNumber - Phone number (10 digits, without country code)
+ * @param {string} otp - 6-digit OTP code
+ * @returns {Promise<Object>} - Twilio message object
+ */
+const sendOTP = async (phoneNumber, otp) => {
+  // Ensure Twilio is initialized
+  if (!twilioClient) {
+    twilioClient = initializeTwilio();
+  }
+
+  if (!twilioClient) {
+    throw new Error('Twilio client not initialized. Please check your environment variables.');
+  }
+
+  const twilioPhoneNumber = process.env.TWILIO_PHONE_NUMBER;
+  
+  if (!twilioPhoneNumber) {
+    throw new Error('TWILIO_PHONE_NUMBER environment variable is not set');
+  }
+
+  // Format phone number: add +91 country code for India
+  const formattedPhone = phoneNumber.startsWith('+') 
+    ? phoneNumber 
+    : `+91${phoneNumber}`;
+
+  try {
+    const message = await twilioClient.messages.create({
+      body: `Your OTP is ${otp}. Valid for 10 minutes. Do not share this code with anyone.`,
+      from: twilioPhoneNumber,
+      to: formattedPhone
+    });
+
+    console.log(`✅ OTP sent to ${formattedPhone}. Message SID: ${message.sid}`);
+    return message;
+  } catch (error) {
+    console.error(`❌ Error sending OTP to ${formattedPhone}:`, error.message);
+    throw new Error(`Failed to send OTP: ${error.message}`);
+  }
+};
+
+/**
+ * Generate a 6-digit OTP
+ * @returns {string} - 6-digit OTP
+ */
+const generateOTP = () => {
+  return Math.floor(100000 + Math.random() * 900000).toString();
+};
+
+/**
+ * Generate a unique session ID
+ * @returns {string} - Unique session ID
+ */
+const generateSessionId = () => {
+  return require('crypto').randomBytes(32).toString('hex');
+};
+
+module.exports = {
+  sendOTP,
+  generateOTP,
+  generateSessionId,
+  initializeTwilio
+};
+

@@ -9,8 +9,12 @@ const userSchema = new mongoose.Schema({
   },
   email: {
     type: String,
-    required: [true, 'Email is required'],
+    required: function() {
+      // Email is required if password is provided (for email/password auth)
+      return !!this.password;
+    },
     unique: true,
+    sparse: true, // Allow multiple null values
     lowercase: true,
     trim: true,
     match: [/^\S+@\S+\.\S+$/, 'Please provide a valid email'],
@@ -18,20 +22,22 @@ const userSchema = new mongoose.Schema({
   },
   password: {
     type: String,
-    required: [true, 'Password is required'],
+    required: false, // Password is now optional (for OTP-based auth)
     minlength: [6, 'Password must be at least 6 characters'],
     select: false
   },
   phone: {
     type: String,
     required: [true, 'Phone is required'],
+    unique: true, // Phone is now unique and primary identifier
     trim: true,
     validate: {
       validator: function (v) {
         return /^\d{10,}$/.test(v.replace(/\D/g, ''));
       },
       message: 'Phone must contain at least 10 digits'
-    }
+    },
+    index: true
   },
   homeAddress: {
     type: String,
@@ -68,7 +74,8 @@ const userSchema = new mongoose.Schema({
   role: {
     type: String,
     enum: ['user', 'admin', 'vendor'],
-    default: 'user'
+    default: 'user',
+    index: true // Indexed for efficient queries
   },
   resetPasswordToken: String,
   resetPasswordExpire: Date
@@ -76,9 +83,14 @@ const userSchema = new mongoose.Schema({
   timestamps: true
 });
 
-// Hash password before saving
+// Hash password before saving (only if password is provided)
 userSchema.pre('save', async function (next) {
-  if (!this.isModified('password')) {
+  // If password is provided, email must also be provided
+  if (this.password && !this.email) {
+    return next(new Error('Email is required when password is provided'));
+  }
+  
+  if (!this.isModified('password') || !this.password) {
     return next();
   }
   const salt = await bcrypt.genSalt(10);

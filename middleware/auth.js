@@ -34,6 +34,8 @@ const auth = async (req, res, next) => {
     }
 
     req.user = user;
+    req.userId = user._id;
+    req.userRole = user.role;
     next();
   } catch (error) {
     res.status(401).json({
@@ -70,6 +72,8 @@ const adminAuth = async (req, res, next) => {
     if (user && user.role === 'admin') {
       req.user = user;
       req.admin = user;
+      req.userId = user._id;
+      req.userRole = user.role;
       return next();
     }
 
@@ -78,6 +82,8 @@ const adminAuth = async (req, res, next) => {
     if (admin) {
       req.admin = admin;
       req.user = admin; // For consistency
+      req.userId = admin._id;
+      req.userRole = 'admin';
       return next();
     }
 
@@ -148,10 +154,14 @@ const userOrAdminAuth = async (req, res, next) => {
       if (user.role === 'admin') {
         req.user = user;
         req.user.role = 'admin'; // Ensure role is set
+        req.userId = user._id;
+        req.userRole = user.role;
         return next();
       }
       // Regular user
       req.user = user;
+      req.userId = user._id;
+      req.userRole = user.role;
       return next();
     }
 
@@ -161,6 +171,8 @@ const userOrAdminAuth = async (req, res, next) => {
       req.admin = admin;
       req.user = admin; // For consistency
       req.user.role = 'admin'; // Set role for admin
+      req.userId = admin._id;
+      req.userRole = 'admin';
       return next();
     }
 
@@ -178,5 +190,25 @@ const userOrAdminAuth = async (req, res, next) => {
   }
 };
 
-module.exports = { auth, adminAuth, authorize, userOrAdminAuth };
+// Admin-only middleware (simpler version that checks req.userRole)
+const requireAdmin = (req, res, next) => {
+  if (!req.user) {
+    return res.status(401).json({
+      success: false,
+      message: 'Authentication required',
+      error: 'UNAUTHORIZED'
+    });
+  }
+
+  if (req.userRole !== 'admin') {
+    return res.status(403).json({
+      success: false,
+      message: 'Access denied. Admin privileges required.',
+      error: 'FORBIDDEN'
+    });
+  }
+  next();
+};
+
+module.exports = { auth, adminAuth, authorize, userOrAdminAuth, requireAdmin };
 

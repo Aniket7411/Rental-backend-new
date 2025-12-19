@@ -1,13 +1,34 @@
 const Service = require('../models/Service');
+const { SERVICE_CATEGORIES, isValidCategory, getCategoryErrorMessage } = require('../utils/serviceConstants');
 
 // Get all services (Public)
 exports.getAllServices = async (req, res, next) => {
   try {
-    const services = await Service.find().sort({ createdAt: -1 });
+    const { category } = req.query;
+    
+    // Build query object
+    const query = {};
+    
+    // Add category filter if provided
+    if (category) {
+      // Validate category value
+      if (!isValidCategory(category)) {
+        return res.status(400).json({
+          success: false,
+          message: getCategoryErrorMessage(),
+          error: 'VALIDATION_ERROR'
+        });
+      }
+      
+      query.category = category;
+    }
+    
+    const services = await Service.find(query).sort({ createdAt: -1 });
 
     res.status(200).json({
       success: true,
-      data: services
+      data: services,
+      total: services.length
     });
   } catch (error) {
     next(error);
@@ -48,8 +69,20 @@ exports.createService = async (req, res, next) => {
       process = [],
       benefits = [],
       keyFeatures = [],
-      recommendedFrequency
+      recommendedFrequency,
+      category
     } = req.body;
+
+    // Validate category if provided
+    if (category !== undefined && category !== null && category !== '') {
+      if (!isValidCategory(category)) {
+        return res.status(400).json({
+          success: false,
+          message: getCategoryErrorMessage(),
+          error: 'VALIDATION_ERROR'
+        });
+      }
+    }
 
     const service = await Service.create({
       title,
@@ -61,7 +94,8 @@ exports.createService = async (req, res, next) => {
       process: Array.isArray(process) ? process : [],
       benefits: Array.isArray(benefits) ? benefits : [],
       keyFeatures: Array.isArray(keyFeatures) ? keyFeatures : [],
-      recommendedFrequency
+      recommendedFrequency,
+      category: (category && category.trim() !== '') ? category : null // Set to null if empty/undefined
     });
 
     res.status(201).json({
@@ -70,10 +104,19 @@ exports.createService = async (req, res, next) => {
       data: {
         _id: service._id,
         title: service.title,
+        category: service.category,
         createdAt: service.createdAt
       }
     });
   } catch (error) {
+    // Handle Mongoose validation errors (including enum validation)
+    if (error.name === 'ValidationError') {
+      return res.status(400).json({
+        success: false,
+        message: error.message,
+        error: 'VALIDATION_ERROR'
+      });
+    }
     next(error);
   }
 };
@@ -90,6 +133,23 @@ exports.updateService = async (req, res, next) => {
       });
     }
 
+    // Validate category if provided
+    if (req.body.category !== undefined) {
+      // Allow clearing the category (null or empty string)
+      if (req.body.category === null || req.body.category === '') {
+        // Category will be set to null
+      } else {
+        // Validate category value
+        if (!isValidCategory(req.body.category)) {
+          return res.status(400).json({
+            success: false,
+            message: getCategoryErrorMessage(),
+            error: 'VALIDATION_ERROR'
+          });
+        }
+      }
+    }
+
     // Update fields
     const updateFields = {};
     if (req.body.title !== undefined) updateFields.title = req.body.title;
@@ -102,6 +162,10 @@ exports.updateService = async (req, res, next) => {
     if (req.body.benefits !== undefined) updateFields.benefits = Array.isArray(req.body.benefits) ? req.body.benefits : [];
     if (req.body.keyFeatures !== undefined) updateFields.keyFeatures = Array.isArray(req.body.keyFeatures) ? req.body.keyFeatures : [];
     if (req.body.recommendedFrequency !== undefined) updateFields.recommendedFrequency = req.body.recommendedFrequency;
+    if (req.body.category !== undefined) {
+      // Set to null if explicitly cleared (null or empty string), otherwise use the validated value
+      updateFields.category = (req.body.category === null || req.body.category === '') ? null : req.body.category;
+    }
 
     const updatedService = await Service.findByIdAndUpdate(
       req.params.id,
@@ -114,10 +178,19 @@ exports.updateService = async (req, res, next) => {
       message: 'Service updated successfully',
       data: {
         _id: updatedService._id,
-        title: updatedService.title
+        title: updatedService.title,
+        category: updatedService.category
       }
     });
   } catch (error) {
+    // Handle Mongoose validation errors (including enum validation)
+    if (error.name === 'ValidationError') {
+      return res.status(400).json({
+        success: false,
+        message: error.message,
+        error: 'VALIDATION_ERROR'
+      });
+    }
     next(error);
   }
 };
