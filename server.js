@@ -27,6 +27,7 @@ const serviceRequestRoutes = require('./routes/serviceRequests');
 const ticketRoutes = require('./routes/tickets');
 const faqRoutes = require('./routes/faqs');
 const couponRoutes = require('./routes/coupons');
+const settingsRoutes = require('./routes/settings');
 
 // Import error handler
 const errorHandler = require('./middleware/errorHandler');
@@ -94,12 +95,18 @@ app.use(express.urlencoded({ extended: true }));
 
 
 // Database connection
-mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/coolrentals', {
-  useNewUrlParser: true,
-  useUnifiedTopology: true,
-})
-  .then(() => {
+mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/coolrentals')
+  .then(async () => {
     console.log('Connected to MongoDB');
+
+    // Initialize default settings
+    try {
+      const Settings = require('./models/Settings');
+      await Settings.getSettings();
+      console.log('✅ Default settings initialized');
+    } catch (error) {
+      console.error('⚠️  Error initializing settings:', error);
+    }
   })
   .catch((err) => {
     console.error('MongoDB connection error:', err);
@@ -128,6 +135,7 @@ app.use('/api/users/service-requests', serviceRequestRoutes);
 app.use('/api/tickets', ticketRoutes);
 app.use('/api/faqs', faqRoutes);
 app.use('/api/coupons', couponRoutes);
+app.use('/api', settingsRoutes); // Settings routes (includes /settings and /admin/settings)
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {

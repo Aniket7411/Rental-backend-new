@@ -49,7 +49,22 @@ const sendOTP = async (phoneNumber, otp) => {
     throw new Error('TWILIO_PHONE_NUMBER environment variable is not set');
   }
 
-  // Format phone number: add +91 country code for India
+  // Normalize Twilio phone number to E.164 format
+  // Remove any spaces, dashes, or parentheses
+  let normalizedTwilioNumber = twilioPhoneNumber.trim().replace(/[\s\-\(\)]/g, '');
+  
+  // Ensure it starts with +
+  if (!normalizedTwilioNumber.startsWith('+')) {
+    // If it starts with a country code without +, add it
+    if (normalizedTwilioNumber.startsWith('91')) {
+      normalizedTwilioNumber = '+' + normalizedTwilioNumber;
+    } else {
+      // Assume it's a US number or add +1
+      normalizedTwilioNumber = '+' + normalizedTwilioNumber;
+    }
+  }
+
+  // Format recipient phone number: add +91 country code for India
   const formattedPhone = phoneNumber.startsWith('+') 
     ? phoneNumber 
     : `+91${phoneNumber}`;
@@ -57,7 +72,7 @@ const sendOTP = async (phoneNumber, otp) => {
   try {
     const message = await twilioClient.messages.create({
       body: `Your OTP is ${otp}. Valid for 10 minutes. Do not share this code with anyone.`,
-      from: twilioPhoneNumber,
+      from: normalizedTwilioNumber,
       to: formattedPhone
     });
 

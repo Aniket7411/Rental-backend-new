@@ -63,6 +63,12 @@ const {
   deleteLead,
   getLeadStats
 } = require('../controllers/leadController');
+const {
+  getAllUsers,
+  getUserById,
+  getUserOrders,
+  getUserStats
+} = require('../controllers/userController');
 const { validateAdminLogin, validateAC, validateService, validateLeadStatusUpdate } = require('../middleware/validation');
 
 // Admin login (public)
@@ -128,6 +134,12 @@ router.get('/leads/stats', adminAuth, getLeadStats);
 router.get('/leads/:id', adminAuth, getLeadById);
 router.patch('/leads/:id', adminAuth, validateLeadStatusUpdate, updateLeadStatus);
 router.delete('/leads/:id', adminAuth, deleteLead);
+
+// Admin user management routes
+router.get('/users', adminAuth, getAllUsers);
+router.get('/users/:userId', adminAuth, getUserById);
+router.get('/users/:userId/orders', adminAuth, getUserOrders);
+router.get('/users/:userId/stats', adminAuth, getUserStats);
 
 module.exports = router;
 

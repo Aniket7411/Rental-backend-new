@@ -463,8 +463,14 @@ exports.createOrder = async (req, res, next) => {
       }
     }
 
-    // Calculate payment discount (5% if payNow)
-    const calculatedPaymentDiscount = paymentOption === 'payNow' ? calculatedTotal * 0.05 : 0;
+    // Calculate payment discount using dynamic settings (default 10% if payNow)
+    let calculatedPaymentDiscount = 0;
+    if (paymentOption === 'payNow') {
+      const Settings = require('../models/Settings');
+      const settings = await Settings.getSettings();
+      const discountPercentage = settings.instantPaymentDiscount / 100;
+      calculatedPaymentDiscount = calculatedTotal * discountPercentage;
+    }
 
     // Validate and apply coupon discount if provided
     let calculatedCouponDiscount = 0;

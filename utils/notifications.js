@@ -296,12 +296,16 @@ ASH Enterprises Team
   }
 };
 
+console.log("process.env.TWILIO_ACCOUNT_SID",process.env.TWILIO_ACCOUNT_SID)
+console.log("process.env.TWILIO_AUTH_TOKEN",process.env.TWILIO_AUTH_TOKEN)
+console.log("process.env.TWILIO_PHONE_NUMBER",process.env.TWILIO_PHONE_NUMBER)
+
 // SMS notification (placeholder - integrate with SMS service like Twilio)
 exports.sendSMS = async (phone, message) => {
   try {
     // Implement SMS sending logic here
     // Example with Twilio:
-    /*
+    
     const twilio = require('twilio');
     const client = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
     
@@ -310,7 +314,6 @@ exports.sendSMS = async (phone, message) => {
       from: process.env.TWILIO_PHONE_NUMBER,
       to: phone
     });
-    */
     console.log('SMS notification (not implemented):', phone, message);
   } catch (error) {
     console.error('Error sending SMS:', error);

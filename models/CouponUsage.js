@@ -15,8 +15,7 @@ const couponUsageSchema = new mongoose.Schema({
   },
   orderId: {
     type: String,
-    required: [true, 'Order ID is required'],
-    index: true
+    required: [true, 'Order ID is required']
   },
   discountAmount: {
     type: Number,

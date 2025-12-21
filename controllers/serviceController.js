@@ -56,6 +56,19 @@ exports.getServiceById = async (req, res, next) => {
   }
 };
 
+// Helper function to validate image URL
+const isValidImageUrl = (url) => {
+  if (!url || url.trim() === '') return true; // Empty is valid (optional field)
+  
+  try {
+    const urlObj = new URL(url);
+    // Check if it's http or https
+    return urlObj.protocol === 'http:' || urlObj.protocol === 'https:';
+  } catch (error) {
+    return false;
+  }
+};
+
 // Create service (Admin)
 exports.createService = async (req, res, next) => {
   try {
@@ -84,13 +97,24 @@ exports.createService = async (req, res, next) => {
       }
     }
 
+    // Validate image URL if provided
+    if (image !== undefined && image !== null && image !== '') {
+      if (!isValidImageUrl(image)) {
+        return res.status(400).json({
+          success: false,
+          message: 'Please provide a valid image URL (must start with http:// or https://)',
+          error: 'VALIDATION_ERROR'
+        });
+      }
+    }
+
     const service = await Service.create({
       title,
       description,
       price,
       originalPrice,
       badge: badge || null,
-      image,
+      image: (image && image.trim() !== '') ? image.trim() : null, // Store null if empty
       process: Array.isArray(process) ? process : [],
       benefits: Array.isArray(benefits) ? benefits : [],
       keyFeatures: Array.isArray(keyFeatures) ? keyFeatures : [],
@@ -105,6 +129,7 @@ exports.createService = async (req, res, next) => {
         _id: service._id,
         title: service.title,
         category: service.category,
+        image: service.image,
         createdAt: service.createdAt
       }
     });
@@ -150,6 +175,19 @@ exports.updateService = async (req, res, next) => {
       }
     }
 
+    // Validate image URL if provided
+    if (req.body.image !== undefined) {
+      if (req.body.image === null || req.body.image === '') {
+        // Allow clearing the image - will be handled in updateFields
+      } else if (!isValidImageUrl(req.body.image)) {
+        return res.status(400).json({
+          success: false,
+          message: 'Please provide a valid image URL (must start with http:// or https://)',
+          error: 'VALIDATION_ERROR'
+        });
+      }
+    }
+
     // Update fields
     const updateFields = {};
     if (req.body.title !== undefined) updateFields.title = req.body.title;
@@ -157,7 +195,10 @@ exports.updateService = async (req, res, next) => {
     if (req.body.price !== undefined) updateFields.price = req.body.price;
     if (req.body.originalPrice !== undefined) updateFields.originalPrice = req.body.originalPrice;
     if (req.body.badge !== undefined) updateFields.badge = req.body.badge || null;
-    if (req.body.image !== undefined) updateFields.image = req.body.image;
+    if (req.body.image !== undefined) {
+      // Set to null if empty, otherwise use the validated and trimmed URL
+      updateFields.image = (req.body.image === null || req.body.image === '') ? null : req.body.image.trim();
+    }
     if (req.body.process !== undefined) updateFields.process = Array.isArray(req.body.process) ? req.body.process : [];
     if (req.body.benefits !== undefined) updateFields.benefits = Array.isArray(req.body.benefits) ? req.body.benefits : [];
     if (req.body.keyFeatures !== undefined) updateFields.keyFeatures = Array.isArray(req.body.keyFeatures) ? req.body.keyFeatures : [];
@@ -179,7 +220,8 @@ exports.updateService = async (req, res, next) => {
       data: {
         _id: updatedService._id,
         title: updatedService.title,
-        category: updatedService.category
+        category: updatedService.category,
+        image: updatedService.image
       }
     });
   } catch (error) {

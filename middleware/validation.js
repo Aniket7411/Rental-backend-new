@@ -263,9 +263,18 @@ exports.validateService = [
     .isIn(['Visit Within 1 Hour', 'Most Booked', 'Power Saver', null, ''])
     .withMessage('Badge must be one of: Visit Within 1 Hour, Most Booked, Power Saver'),
   body('image')
-    .optional()
-    .isURL()
-    .withMessage('Image must be a valid URL'),
+    .optional({ nullable: true, checkFalsy: true })
+    .custom((value) => {
+      // Allow null, empty string, or valid URL
+      if (!value || value === '') return true;
+      try {
+        const url = new URL(value);
+        return url.protocol === 'http:' || url.protocol === 'https:';
+      } catch {
+        return false;
+      }
+    })
+    .withMessage('Image must be a valid URL (http:// or https://) or empty'),
   body('process')
     .optional()
     .isArray()

@@ -29,8 +29,7 @@ const otpSchema = new mongoose.Schema({
   },
   expiresAt: {
     type: Date,
-    required: true,
-    index: { expireAfterSeconds: 0 } // Auto-delete expired documents
+    required: true
   },
   attempts: {
     type: Number,
@@ -47,6 +46,7 @@ const otpSchema = new mongoose.Schema({
 
 // Index for faster lookups
 otpSchema.index({ phone: 1, sessionId: 1 });
+// TTL index for auto-deleting expired documents
 otpSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
 
 module.exports = mongoose.model('OTP', otpSchema);

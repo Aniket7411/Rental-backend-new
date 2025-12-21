@@ -749,13 +749,16 @@ exports.calculatePayment = async (req, res, next) => {
       });
     }
 
-    // Calculate discount
+    // Calculate discount using dynamic settings
     let discountAmount = 0;
     let finalAmount = order.total;
 
-    // Apply discount if payNow (5%)
+    // Apply discount if payNow (using dynamic discount percentage)
     if (paymentMethod === 'payNow') {
-      discountAmount = order.total * 0.05;
+      const Settings = require('../models/Settings');
+      const settings = await Settings.getSettings();
+      const discountPercentage = settings.instantPaymentDiscount / 100;
+      discountAmount = order.total * discountPercentage;
       finalAmount = order.total - discountAmount;
     }
 

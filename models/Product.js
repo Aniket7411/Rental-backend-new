@@ -74,7 +74,7 @@ const productSchema = new mongoose.Schema({
   },
   discount: {
     type: Number,
-    default: 0,
+    default: 0, // 0, null, or undefined means frontend will use default 10% discount
     min: 0,
     max: 100
   },
