@@ -8,7 +8,8 @@ exports.getPublicSettings = async (req, res, next) => {
     res.json({
       success: true,
       data: {
-        instantPaymentDiscount: settings.instantPaymentDiscount
+        instantPaymentDiscount: settings.instantPaymentDiscount,
+        advancePaymentDiscount: settings.advancePaymentDiscount
       }
     });
   } catch (error) {
@@ -17,7 +18,8 @@ exports.getPublicSettings = async (req, res, next) => {
     res.json({
       success: true,
       data: {
-        instantPaymentDiscount: 10
+        instantPaymentDiscount: 10,
+        advancePaymentDiscount: 5
       }
     });
   }
@@ -32,6 +34,7 @@ exports.getSettings = async (req, res, next) => {
       success: true,
       data: {
         instantPaymentDiscount: settings.instantPaymentDiscount,
+        advancePaymentDiscount: settings.advancePaymentDiscount,
         updatedAt: settings.updatedAt,
         updatedBy: settings.updatedBy
       }
@@ -49,22 +52,40 @@ exports.getSettings = async (req, res, next) => {
 // Update Settings (Admin)
 exports.updateSettings = async (req, res, next) => {
   try {
-    const { instantPaymentDiscount } = req.body;
+    const { instantPaymentDiscount, advancePaymentDiscount } = req.body;
 
-    // Validation
-    if (instantPaymentDiscount === undefined || instantPaymentDiscount === null) {
-      return res.status(400).json({
-        success: false,
-        message: 'instantPaymentDiscount is required',
-        error: 'VALIDATION_ERROR'
-      });
+    // Build update object (only include fields that are provided - partial updates)
+    const updateData = {};
+
+    if (instantPaymentDiscount !== undefined && instantPaymentDiscount !== null) {
+      const discount = parseFloat(instantPaymentDiscount);
+      if (isNaN(discount) || discount < 0 || discount > 100) {
+        return res.status(400).json({
+          success: false,
+          message: 'instantPaymentDiscount must be a number between 0 and 100',
+          error: 'VALIDATION_ERROR'
+        });
+      }
+      updateData.instantPaymentDiscount = discount;
     }
 
-    const discount = parseFloat(instantPaymentDiscount);
-    if (isNaN(discount) || discount < 0 || discount > 100) {
+    if (advancePaymentDiscount !== undefined && advancePaymentDiscount !== null) {
+      const discount = parseFloat(advancePaymentDiscount);
+      if (isNaN(discount) || discount < 0 || discount > 100) {
+        return res.status(400).json({
+          success: false,
+          message: 'advancePaymentDiscount must be a number between 0 and 100',
+          error: 'VALIDATION_ERROR'
+        });
+      }
+      updateData.advancePaymentDiscount = discount;
+    }
+
+    // At least one field must be provided
+    if (Object.keys(updateData).length === 0) {
       return res.status(400).json({
         success: false,
-        message: 'instantPaymentDiscount must be a number between 0 and 100',
+        message: 'At least one discount field must be provided',
         error: 'VALIDATION_ERROR'
       });
     }
@@ -73,16 +94,14 @@ exports.updateSettings = async (req, res, next) => {
     const updatedBy = req.user?._id || req.user?.id || null;
 
     // Update or create settings
-    const settings = await Settings.updateSettings(
-      { instantPaymentDiscount: discount },
-      updatedBy
-    );
+    const settings = await Settings.updateSettings(updateData, updatedBy);
 
     res.json({
       success: true,
       message: 'Settings updated successfully',
       data: {
         instantPaymentDiscount: settings.instantPaymentDiscount,
+        advancePaymentDiscount: settings.advancePaymentDiscount,
         updatedAt: settings.updatedAt,
         updatedBy: settings.updatedBy
       }

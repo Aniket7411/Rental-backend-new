@@ -176,8 +176,9 @@ exports.initiatePayment = async (req, res, next) => {
     // Calculate amounts
     let paymentAmount = amount;
     if (paymentMethod === 'advance') {
-      // Calculate advance amount (e.g., 10% or fixed amount)
-      paymentAmount = Math.min(amount, order.totalAmount * 0.1); // 10% or specified amount
+      // For advance payment, use ₹999 as fixed advance amount
+      // The discount is applied to the total order amount, not the advance
+      paymentAmount = Math.min(amount, 999); // Fixed ₹999 advance
     }
 
     // Create payment record
@@ -750,14 +751,22 @@ exports.calculatePayment = async (req, res, next) => {
     }
 
     // Calculate discount using dynamic settings
+    // payNow/full uses instantPaymentDiscount, advance uses advancePaymentDiscount
     let discountAmount = 0;
     let finalAmount = order.total;
 
-    // Apply discount if payNow (using dynamic discount percentage)
-    if (paymentMethod === 'payNow') {
+    if (paymentMethod === 'payNow' || paymentMethod === 'full') {
+      // Pay Now (full payment) - use instantPaymentDiscount
       const Settings = require('../models/Settings');
       const settings = await Settings.getSettings();
       const discountPercentage = settings.instantPaymentDiscount / 100;
+      discountAmount = order.total * discountPercentage;
+      finalAmount = order.total - discountAmount;
+    } else if (paymentMethod === 'advance') {
+      // Pay Advance - use advancePaymentDiscount
+      const Settings = require('../models/Settings');
+      const settings = await Settings.getSettings();
+      const discountPercentage = settings.advancePaymentDiscount / 100;
       discountAmount = order.total * discountPercentage;
       finalAmount = order.total - discountAmount;
     }

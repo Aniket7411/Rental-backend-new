@@ -103,7 +103,7 @@ mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/coolrenta
     try {
       const Settings = require('./models/Settings');
       await Settings.getSettings();
-      console.log('✅ Default settings initialized');
+      console.log('✅ Default settings initialized (instantPaymentDiscount: 10%, advancePaymentDiscount: 5%)');
     } catch (error) {
       console.error('⚠️  Error initializing settings:', error);
     }

@@ -180,10 +180,10 @@ exports.createOrder = async (req, res, next) => {
       });
     }
 
-    if (!paymentOption || !['payNow', 'payLater'].includes(paymentOption)) {
+    if (!paymentOption || !['payNow', 'payLater', 'payAdvance'].includes(paymentOption)) {
       return res.status(400).json({
         success: false,
-        message: 'Payment option must be "payNow" or "payLater"',
+        message: 'Payment option must be "payNow", "payLater", or "payAdvance"',
         error: 'VALIDATION_ERROR'
       });
     }
@@ -463,12 +463,18 @@ exports.createOrder = async (req, res, next) => {
       }
     }
 
-    // Calculate payment discount using dynamic settings (default 10% if payNow)
+    // Calculate payment discount using dynamic settings
+    // payNow uses instantPaymentDiscount, payAdvance uses advancePaymentDiscount
     let calculatedPaymentDiscount = 0;
-    if (paymentOption === 'payNow') {
+    if (paymentOption === 'payNow' || paymentOption === 'payAdvance') {
       const Settings = require('../models/Settings');
       const settings = await Settings.getSettings();
-      const discountPercentage = settings.instantPaymentDiscount / 100;
+      let discountPercentage;
+      if (paymentOption === 'payNow') {
+        discountPercentage = settings.instantPaymentDiscount / 100;
+      } else if (paymentOption === 'payAdvance') {
+        discountPercentage = settings.advancePaymentDiscount / 100;
+      }
       calculatedPaymentDiscount = calculatedTotal * discountPercentage;
     }
 

@@ -8,6 +8,13 @@ const settingsSchema = new mongoose.Schema({
     max: 100,
     required: true
   },
+  advancePaymentDiscount: {
+    type: Number,
+    default: 5,
+    min: 0,
+    max: 100,
+    required: true
+  },
   updatedBy: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User'
@@ -20,7 +27,10 @@ const settingsSchema = new mongoose.Schema({
 settingsSchema.statics.getSettings = async function() {
   let settings = await this.findOne();
   if (!settings) {
-    settings = await this.create({ instantPaymentDiscount: 10 });
+    settings = await this.create({ 
+      instantPaymentDiscount: 10,
+      advancePaymentDiscount: 5
+    });
   }
   return settings;
 };
