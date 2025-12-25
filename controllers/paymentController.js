@@ -362,10 +362,10 @@ exports.verifyPayment = async (req, res, next) => {
         success: true,
         message: 'Payment verified successfully',
         data: {
-          paymentId: payment.paymentId,
-          status: payment.status,
           orderId: order?.orderId,
-          transactionId: payment.transactionId
+          paymentId: payment.paymentId,
+          paymentStatus: 'paid', // Per handoff doc
+          verifiedAt: payment.paidAt // Per handoff doc
         }
       });
     } catch (razorpayError) {
@@ -397,10 +397,10 @@ exports.verifyPayment = async (req, res, next) => {
         success: true,
         message: 'Payment verified successfully (signature verified, API verification skipped)',
         data: {
-          paymentId: payment.paymentId,
-          status: payment.status,
           orderId: order?.orderId,
-          transactionId: payment.transactionId
+          paymentId: payment.paymentId,
+          paymentStatus: 'paid', // Per handoff doc
+          verifiedAt: payment.paidAt // Per handoff doc
         }
       });
     }

@@ -96,6 +96,11 @@ const orderSchema = new mongoose.Schema({
     required: [true, 'Total amount is required'],
     min: 0
   },
+  productDiscount: {
+    type: Number,
+    default: 0,
+    min: 0
+  },
   discount: {
     type: Number,
     default: 0,

@@ -133,9 +133,11 @@ exports.createOrder = async (req, res, next) => {
       paymentOption,
       paymentStatus,
       total,
-      discount,
+      productDiscount, // Total product discount amount (from handoff doc)
+      discount, // Total discount (product + payment + coupon)
       couponCode,
       couponDiscount,
+      paymentDiscount, // Payment option discount (Pay Now discount)
       finalTotal,
       customerInfo,
       deliveryAddresses,
@@ -170,6 +172,18 @@ exports.createOrder = async (req, res, next) => {
         message: 'orderId must be a string',
         error: 'VALIDATION_ERROR'
       });
+    }
+
+    // Check orderId uniqueness if provided (per handoff doc requirement)
+    if (orderId) {
+      const existingOrder = await Order.findOne({ orderId: orderId.trim() });
+      if (existingOrder) {
+        return res.status(400).json({
+          success: false,
+          message: `Order ID ${orderId} already exists`,
+          error: 'ORDER_ID_DUPLICATE'
+        });
+      }
     }
 
     if (!items || !Array.isArray(items) || items.length === 0) {
@@ -643,11 +657,15 @@ exports.createOrder = async (req, res, next) => {
     }
 
     // Create order with new structure
+    // Accept productDiscount from frontend (per handoff doc)
+    const orderProductDiscount = productDiscount !== undefined ? productDiscount : 0;
+    
     const orderData = {
       orderId: orderId, // Frontend provides orderId
       userId,
       items: processedItems,
       total: orderTotal,
+      productDiscount: orderProductDiscount, // Total product discount amount
       discount: orderDiscount,
       paymentDiscount: orderPaymentDiscount,
       couponCode: couponCode ? couponCode.trim().toUpperCase() : null,
@@ -786,10 +804,15 @@ exports.createOrder = async (req, res, next) => {
       console.error('Failed to send order notification email:', error);
     });
 
+    // Response structure per handoff doc
     res.status(201).json({
       success: true,
       message: 'Order created successfully',
-      data: order
+      data: {
+        orderId: order.orderId,
+        order: order, // Full order object as stored in DB
+        createdAt: order.createdAt
+      }
     });
   } catch (error) {
     next(error);
