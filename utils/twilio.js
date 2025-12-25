@@ -44,7 +44,7 @@ const sendOTP = async (phoneNumber, otp) => {
   }
 
   const twilioPhoneNumber = process.env.TWILIO_PHONE_NUMBER;
-  
+
   if (!twilioPhoneNumber) {
     throw new Error('TWILIO_PHONE_NUMBER environment variable is not set');
   }
@@ -52,21 +52,24 @@ const sendOTP = async (phoneNumber, otp) => {
   // Normalize Twilio phone number to E.164 format
   // Remove any spaces, dashes, or parentheses
   let normalizedTwilioNumber = twilioPhoneNumber.trim().replace(/[\s\-\(\)]/g, '');
-  
+
   // Ensure it starts with +
   if (!normalizedTwilioNumber.startsWith('+')) {
     // If it starts with a country code without +, add it
     if (normalizedTwilioNumber.startsWith('91')) {
       normalizedTwilioNumber = '+' + normalizedTwilioNumber;
+    } else if (normalizedTwilioNumber.length === 10) {
+      // If it's 10 digits, assume it's a US number and add +1
+      normalizedTwilioNumber = '+1' + normalizedTwilioNumber;
     } else {
-      // Assume it's a US number or add +1
+      // Otherwise, just add +
       normalizedTwilioNumber = '+' + normalizedTwilioNumber;
     }
   }
 
   // Format recipient phone number: add +91 country code for India
-  const formattedPhone = phoneNumber.startsWith('+') 
-    ? phoneNumber 
+  const formattedPhone = phoneNumber.startsWith('+')
+    ? phoneNumber
     : `+91${phoneNumber}`;
 
   try {
@@ -80,6 +83,18 @@ const sendOTP = async (phoneNumber, otp) => {
     return message;
   } catch (error) {
     console.error(`❌ Error sending OTP to ${formattedPhone}:`, error.message);
+
+    // Provide helpful error messages for common issues
+    if (error.message.includes('not a Twilio phone number')) {
+      const helpfulMessage = `The phone number ${normalizedTwilioNumber} is not a valid Twilio phone number. Please:
+1. Go to Twilio Console → Phone Numbers → Buy a number
+2. Purchase a phone number for your account
+3. Update TWILIO_PHONE_NUMBER in your .env file with the exact number from Twilio
+4. Restart your server`;
+      console.error(`\n💡 ${helpfulMessage}\n`);
+      throw new Error(`Failed to send OTP: ${error.message}. ${helpfulMessage}`);
+    }
+
     throw new Error(`Failed to send OTP: ${error.message}`);
   }
 };

@@ -751,7 +751,8 @@ exports.calculatePayment = async (req, res, next) => {
     }
 
     // Calculate discount using dynamic settings
-    // payNow/full uses instantPaymentDiscount, advance uses advancePaymentDiscount
+    // Order: Product Discount (already in order.total) → Payment Discount → Coupon Discount
+    // order.total is subtotal after product discounts
     let discountAmount = 0;
     let finalAmount = order.total;
 
@@ -770,6 +771,7 @@ exports.calculatePayment = async (req, res, next) => {
       discountAmount = order.total * discountPercentage;
       finalAmount = order.total - discountAmount;
     }
+    // payLater has no payment discount (0%)
 
     res.json({
       success: true,

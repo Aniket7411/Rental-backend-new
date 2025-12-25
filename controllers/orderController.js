@@ -464,19 +464,23 @@ exports.createOrder = async (req, res, next) => {
     }
 
     // Calculate payment discount using dynamic settings
-    // payNow uses instantPaymentDiscount, payAdvance uses advancePaymentDiscount
+    // Order: Product Discount (already in itemPrice) → Payment Discount → Coupon Discount
+    // calculatedTotal is subtotal after product discounts
     let calculatedPaymentDiscount = 0;
-    if (paymentOption === 'payNow' || paymentOption === 'payAdvance') {
+    if (paymentOption === 'payNow') {
+      // Pay Now - use instantPaymentDiscount
       const Settings = require('../models/Settings');
       const settings = await Settings.getSettings();
-      let discountPercentage;
-      if (paymentOption === 'payNow') {
-        discountPercentage = settings.instantPaymentDiscount / 100;
-      } else if (paymentOption === 'payAdvance') {
-        discountPercentage = settings.advancePaymentDiscount / 100;
-      }
+      const discountPercentage = settings.instantPaymentDiscount / 100;
+      calculatedPaymentDiscount = calculatedTotal * discountPercentage;
+    } else if (paymentOption === 'payAdvance') {
+      // Pay Advance - use advancePaymentDiscount
+      const Settings = require('../models/Settings');
+      const settings = await Settings.getSettings();
+      const discountPercentage = settings.advancePaymentDiscount / 100;
       calculatedPaymentDiscount = calculatedTotal * discountPercentage;
     }
+    // payLater has no payment discount (0%)
 
     // Validate and apply coupon discount if provided
     let calculatedCouponDiscount = 0;
