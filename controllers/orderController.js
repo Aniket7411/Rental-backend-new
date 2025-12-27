@@ -7,6 +7,8 @@ const Cart = require('../models/Cart');
 const Coupon = require('../models/Coupon');
 const CouponUsage = require('../models/CouponUsage');
 const { notifyAdmin } = require('../utils/notifications');
+const { roundMoney, validateAndRoundMoney } = require('../utils/money');
+const { formatOrderResponse, formatOrdersResponse } = require('../utils/orderFormatter');
 
 // Get User Orders
 exports.getUserOrders = async (req, res, next) => {
@@ -57,9 +59,12 @@ exports.getUserOrders = async (req, res, next) => {
 
     const totalPages = Math.ceil(total / parseInt(limit));
 
+    // Format orders to ensure all monetary values are rounded
+    const formattedOrders = formatOrdersResponse(orders);
+
     res.json({
       success: true,
-      data: orders,
+      data: formattedOrders,
       pagination: {
         page: parseInt(page),
         limit: parseInt(limit),
@@ -115,9 +120,12 @@ exports.getOrderById = async (req, res, next) => {
       });
     }
 
+    // Format order to ensure all monetary values are rounded
+    const formattedOrder = formatOrderResponse(order);
+
     res.json({
       success: true,
-      data: order
+      data: formattedOrder
     });
   } catch (error) {
     next(error);
@@ -394,6 +402,12 @@ exports.createOrder = async (req, res, next) => {
             : (item.installationCharges.amount || 0);
         }
 
+        // Round monetary values before adding to items
+        const roundedItemPrice = roundMoney(itemPrice);
+        const roundedInstallationCharges = installationChargesAmount > 0 ? roundMoney(installationChargesAmount) : 0;
+        const roundedMonthlyPrice = isMonthlyPayment ? roundMoney(item.monthlyPrice) : null;
+        const roundedSecurityDeposit = isMonthlyPayment ? roundMoney(item.securityDeposit) : null;
+
         processedItems.push({
           type: 'rental',
           productId: product._id,
@@ -401,14 +415,14 @@ exports.createOrder = async (req, res, next) => {
           productDetails: productDetails,
           deliveryInfo: deliveryInfo,
           quantity: item.quantity,
-          price: itemPrice,
+          price: roundedItemPrice,
           duration: duration,
           isMonthlyPayment: isMonthlyPayment,
-          monthlyPrice: isMonthlyPayment ? item.monthlyPrice : null,
+          monthlyPrice: roundedMonthlyPrice,
           monthlyTenure: isMonthlyPayment ? item.monthlyTenure : null,
-          securityDeposit: isMonthlyPayment ? item.securityDeposit : null,
-          installationCharges: installationChargesAmount > 0 ? {
-            amount: installationChargesAmount,
+          securityDeposit: roundedSecurityDeposit,
+          installationCharges: roundedInstallationCharges > 0 ? {
+            amount: roundedInstallationCharges,
             includedItems: product.installationCharges?.includedItems || [],
             extraMaterialRates: product.installationCharges?.extraMaterialRates || {
               copperPipe: 0,
@@ -418,10 +432,10 @@ exports.createOrder = async (req, res, next) => {
           } : null
         });
 
-        // Add rental price and installation charges to total
-        calculatedTotal += itemPrice;
-        if (installationChargesAmount > 0) {
-          calculatedTotal += installationChargesAmount;
+        // Add rental price and installation charges to total (already rounded)
+        calculatedTotal += roundedItemPrice;
+        if (roundedInstallationCharges > 0) {
+          calculatedTotal += roundedInstallationCharges;
         }
       } else if (item.type === 'service') {
         // Process service item
@@ -454,6 +468,9 @@ exports.createOrder = async (req, res, next) => {
         // Use serviceDetails from frontend if provided, otherwise use snapshot
         const serviceDetails = item.serviceDetails || serviceSnapshot;
 
+        // Round service price before adding to items
+        const roundedServicePrice = roundMoney(item.price);
+
         processedItems.push({
           type: 'service',
           serviceId: service._id,
@@ -461,10 +478,10 @@ exports.createOrder = async (req, res, next) => {
           serviceDetails: serviceDetails,
           quantity: item.quantity || 1, // Default to 1 if not provided
           bookingDetails: item.bookingDetails,
-          price: item.price
+          price: roundedServicePrice
         });
 
-        calculatedTotal += item.price;
+        calculatedTotal += roundedServicePrice;
 
         // Store service booking details to create after order
         serviceBookingsToCreate.push({
@@ -477,6 +494,9 @@ exports.createOrder = async (req, res, next) => {
       }
     }
 
+    // Round calculated total to 2 decimal places
+    calculatedTotal = roundMoney(calculatedTotal);
+
     // Calculate payment discount using dynamic settings
     // Order: Product Discount (already in itemPrice) → Payment Discount → Coupon Discount
     // calculatedTotal is subtotal after product discounts
@@ -486,13 +506,13 @@ exports.createOrder = async (req, res, next) => {
       const Settings = require('../models/Settings');
       const settings = await Settings.getSettings();
       const discountPercentage = settings.instantPaymentDiscount / 100;
-      calculatedPaymentDiscount = calculatedTotal * discountPercentage;
+      calculatedPaymentDiscount = roundMoney(calculatedTotal * discountPercentage);
     } else if (paymentOption === 'payAdvance') {
       // Pay Advance - use advancePaymentDiscount
       const Settings = require('../models/Settings');
       const settings = await Settings.getSettings();
       const discountPercentage = settings.advancePaymentDiscount / 100;
-      calculatedPaymentDiscount = calculatedTotal * discountPercentage;
+      calculatedPaymentDiscount = roundMoney(calculatedTotal * discountPercentage);
     }
     // payLater has no payment discount (0%)
 
@@ -611,31 +631,47 @@ exports.createOrder = async (req, res, next) => {
         }
       }
 
-      // Round to 2 decimal places
-      calculatedCouponDiscount = Math.round(calculatedCouponDiscount * 100) / 100;
+      // Round to 2 decimal places using roundMoney utility
+      calculatedCouponDiscount = roundMoney(calculatedCouponDiscount);
     }
 
-    // Use provided coupon discount if provided, otherwise use calculated
-    const finalCouponDiscount = couponDiscount !== undefined ? couponDiscount : calculatedCouponDiscount;
+    // Validate and round provided values, or use calculated values
+    // Round all monetary values to 2 decimal places
+    const roundedTotal = total !== undefined ? validateAndRoundMoney(total, 'total') : calculatedTotal;
+    const roundedPaymentDiscount = validateAndRoundMoney(calculatedPaymentDiscount, 'paymentDiscount');
+    const roundedCouponDiscount = couponDiscount !== undefined ? validateAndRoundMoney(couponDiscount, 'couponDiscount') : calculatedCouponDiscount;
+    
+    // Calculate final total using rounded values: total - paymentDiscount - couponDiscount
+    const calculatedFinalTotal = roundMoney(roundedTotal - roundedPaymentDiscount - roundedCouponDiscount);
 
-    // Calculate final total: Original Total - Payment Discount - Coupon Discount
-    const calculatedFinalTotal = calculatedTotal - calculatedPaymentDiscount - finalCouponDiscount;
+    // Use provided finalTotal if provided (rounded), otherwise use calculated
+    const providedFinalTotal = finalTotal !== undefined ? validateAndRoundMoney(finalTotal, 'finalTotal') : null;
+    
+    // Validate final total calculation
+    // If provided value differs significantly (> 0.01), recalculate and use calculated value
+    let orderFinalTotal;
+    if (providedFinalTotal !== null && Math.abs(providedFinalTotal - calculatedFinalTotal) > 0.01) {
+      console.warn(`Final total mismatch, using calculated value. Provided: ${providedFinalTotal}, Calculated: ${calculatedFinalTotal}`);
+      orderFinalTotal = calculatedFinalTotal;
+    } else {
+      orderFinalTotal = providedFinalTotal !== null ? providedFinalTotal : calculatedFinalTotal;
+    }
 
-    // Use provided values or calculated values
-    const orderTotal = total || calculatedTotal;
-    const orderPaymentDiscount = calculatedPaymentDiscount;
-    const orderCouponDiscount = finalCouponDiscount;
-    const orderDiscount = discount !== undefined ? discount : (orderPaymentDiscount + orderCouponDiscount);
-    const orderFinalTotal = finalTotal || calculatedFinalTotal;
+    // Round all monetary values for order
+    const orderTotal = roundMoney(roundedTotal);
+    const orderProductDiscount = productDiscount !== undefined ? validateAndRoundMoney(productDiscount, 'productDiscount') : 0;
+    const orderPaymentDiscount = roundMoney(roundedPaymentDiscount);
+    const orderCouponDiscount = roundMoney(roundedCouponDiscount);
+    const orderDiscount = discount !== undefined ? validateAndRoundMoney(discount, 'discount') : roundMoney(orderPaymentDiscount + orderCouponDiscount);
+    const finalOrderFinalTotal = roundMoney(orderFinalTotal);
 
-    // Validate totals match
-    const expectedFinalTotal = orderTotal - orderPaymentDiscount - orderCouponDiscount;
-    if (Math.abs(orderFinalTotal - expectedFinalTotal) > 0.01) {
-      return res.status(400).json({
-        success: false,
-        message: `Final total must equal total minus payment discount minus coupon discount. Expected: ${expectedFinalTotal}, Got: ${orderFinalTotal}`,
-        error: 'VALIDATION_ERROR'
-      });
+    // Verify calculation one more time
+    const verificationTotal = roundMoney(orderTotal - orderPaymentDiscount - orderCouponDiscount);
+    let finalCorrectedFinalTotal = finalOrderFinalTotal;
+    if (Math.abs(finalOrderFinalTotal - verificationTotal) > 0.01) {
+      console.warn(`Final total verification failed. Expected: ${verificationTotal}, Got: ${finalOrderFinalTotal}. Using calculated value.`);
+      // Use recalculated value as source of truth
+      finalCorrectedFinalTotal = verificationTotal;
     }
 
     // Set payment status based on payment option
@@ -657,20 +693,18 @@ exports.createOrder = async (req, res, next) => {
     }
 
     // Create order with new structure
-    // Accept productDiscount from frontend (per handoff doc)
-    const orderProductDiscount = productDiscount !== undefined ? productDiscount : 0;
-    
+    // All monetary values are already rounded to 2 decimal places
     const orderData = {
       orderId: orderId, // Frontend provides orderId
       userId,
       items: processedItems,
       total: orderTotal,
-      productDiscount: orderProductDiscount, // Total product discount amount
-      discount: orderDiscount,
-      paymentDiscount: orderPaymentDiscount,
+      productDiscount: orderProductDiscount, // Total product discount amount (rounded)
+      discount: orderDiscount, // Total discount (rounded)
+      paymentDiscount: orderPaymentDiscount, // Payment discount (rounded)
       couponCode: couponCode ? couponCode.trim().toUpperCase() : null,
-      couponDiscount: orderCouponDiscount,
-      finalTotal: orderFinalTotal,
+      couponDiscount: orderCouponDiscount, // Coupon discount (rounded)
+      finalTotal: finalCorrectedFinalTotal, // Final total (rounded and verified)
       paymentOption,
       paymentStatus: finalPaymentStatus,
       status: orderStatus,
@@ -804,13 +838,16 @@ exports.createOrder = async (req, res, next) => {
       console.error('Failed to send order notification email:', error);
     });
 
+    // Format order for response to ensure all monetary values are rounded
+    const formattedOrder = formatOrderResponse(order);
+
     // Response structure per handoff doc
     res.status(201).json({
       success: true,
       message: 'Order created successfully',
       data: {
         orderId: order.orderId,
-        order: order, // Full order object as stored in DB
+        order: formattedOrder, // Full order object with rounded monetary values
         createdAt: order.createdAt
       }
     });
@@ -841,9 +878,12 @@ exports.getAllOrders = async (req, res, next) => {
       .sort({ createdAt: -1 })
       .lean(); // Use lean() for better performance
 
+    // Format orders to ensure all monetary values are rounded (important for lean() queries)
+    const formattedOrders = formatOrdersResponse(orders);
+
     res.json({
       success: true,
-      data: orders
+      data: formattedOrders
     });
   } catch (error) {
     next(error);
@@ -898,6 +938,9 @@ exports.updateOrderStatus = async (req, res, next) => {
       .populate('items.productId')
       .populate('items.serviceId');
 
+    // Format order for response
+    const formattedOrder = formatOrderResponse(order);
+
     // Update product status when order is confirmed
     // Only update if status changed to 'confirmed' and payment is paid
     if (status === 'confirmed' && oldOrder.paymentStatus === 'paid') {
@@ -925,7 +968,7 @@ exports.updateOrderStatus = async (req, res, next) => {
     res.json({
       success: true,
       message: 'Order status updated successfully',
-      data: order
+      data: formattedOrder
     });
   } catch (error) {
     next(error);
@@ -1024,6 +1067,9 @@ exports.cancelOrder = async (req, res, next) => {
       { path: 'userId', select: 'name email phone' }
     ]);
 
+    // Format order for response
+    const formattedOrder = formatOrderResponse(order);
+
     // Notify admin about order cancellation (non-blocking)
     const orderUser = order.userId;
     const subject = `Order ${order.orderId} Cancelled - ${cancelledBy === 'admin' ? 'By Admin' : 'By User'}`;
@@ -1048,7 +1094,7 @@ exports.cancelOrder = async (req, res, next) => {
     res.json({
       success: true,
       message: 'Order cancelled successfully',
-      data: order
+      data: formattedOrder
     });
   } catch (error) {
     next(error);

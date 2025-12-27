@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const { roundMoney } = require('../utils/money');
 
 const orderSchema = new mongoose.Schema({
   orderId: {
@@ -94,17 +95,23 @@ const orderSchema = new mongoose.Schema({
   total: {
     type: Number,
     required: [true, 'Total amount is required'],
-    min: 0
+    min: 0,
+    set: (v) => roundMoney(v),
+    get: (v) => roundMoney(v)
   },
   productDiscount: {
     type: Number,
     default: 0,
-    min: 0
+    min: 0,
+    set: (v) => roundMoney(v),
+    get: (v) => roundMoney(v)
   },
   discount: {
     type: Number,
     default: 0,
-    min: 0
+    min: 0,
+    set: (v) => roundMoney(v),
+    get: (v) => roundMoney(v)
   },
   couponCode: {
     type: String,
@@ -114,17 +121,23 @@ const orderSchema = new mongoose.Schema({
   couponDiscount: {
     type: Number,
     default: 0,
-    min: 0
+    min: 0,
+    set: (v) => roundMoney(v),
+    get: (v) => roundMoney(v)
   },
   paymentDiscount: {
     type: Number,
     default: 0,
-    min: 0
+    min: 0,
+    set: (v) => roundMoney(v),
+    get: (v) => roundMoney(v)
   },
   finalTotal: {
     type: Number,
     required: [true, 'Final total is required'],
-    min: 0
+    min: 0,
+    set: (v) => roundMoney(v),
+    get: (v) => roundMoney(v)
   },
   paymentOption: {
     type: String,
@@ -192,6 +205,33 @@ orderSchema.pre('save', async function (next) {
     const count = await mongoose.model('Order').countDocuments({});
     this.orderId = `ORD-${year}-${String(count + 1).padStart(3, '0')}`;
   }
+  
+  // Ensure all monetary fields are rounded to 2 decimal places
+  this.total = roundMoney(this.total);
+  this.productDiscount = roundMoney(this.productDiscount || 0);
+  this.discount = roundMoney(this.discount || 0);
+  this.couponDiscount = roundMoney(this.couponDiscount || 0);
+  this.paymentDiscount = roundMoney(this.paymentDiscount || 0);
+  this.finalTotal = roundMoney(this.finalTotal);
+  
+  // Round monetary fields in items array
+  if (this.items && Array.isArray(this.items)) {
+    this.items.forEach(item => {
+      if (item.price !== undefined) {
+        item.price = roundMoney(item.price);
+      }
+      if (item.monthlyPrice !== undefined && item.monthlyPrice !== null) {
+        item.monthlyPrice = roundMoney(item.monthlyPrice);
+      }
+      if (item.securityDeposit !== undefined && item.securityDeposit !== null) {
+        item.securityDeposit = roundMoney(item.securityDeposit);
+      }
+      if (item.installationCharges && item.installationCharges.amount !== undefined) {
+        item.installationCharges.amount = roundMoney(item.installationCharges.amount);
+      }
+    });
+  }
+  
   next();
 });
 

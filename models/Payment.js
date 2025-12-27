@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const { roundMoney } = require('../utils/money');
 
 const paymentSchema = new mongoose.Schema({
   paymentId: {
@@ -22,7 +23,9 @@ const paymentSchema = new mongoose.Schema({
   amount: {
     type: Number,
     required: [true, 'Amount is required'],
-    min: 0
+    min: 0,
+    set: (v) => roundMoney(v),
+    get: (v) => roundMoney(v)
   },
   currency: {
     type: String,
@@ -59,13 +62,19 @@ const paymentSchema = new mongoose.Schema({
   timestamps: true
 });
 
-// Generate payment ID before saving
+// Generate payment ID before saving and ensure amount is rounded
 paymentSchema.pre('save', async function (next) {
   if (!this.paymentId) {
     const timestamp = Date.now();
     const random = Math.floor(Math.random() * 10000);
     this.paymentId = `PAY-${timestamp}-${random}`;
   }
+  
+  // Ensure amount is rounded to 2 decimal places
+  if (this.amount !== undefined && this.amount !== null) {
+    this.amount = roundMoney(this.amount);
+  }
+  
   next();
 });
 

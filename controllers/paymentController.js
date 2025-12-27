@@ -4,6 +4,7 @@ const Razorpay = require('razorpay');
 const crypto = require('crypto');
 const mongoose = require('mongoose');
 const { notifyAdmin } = require('../utils/notifications');
+const { roundMoney, validateAndRoundMoney } = require('../utils/money');
 
 // Initialize Razorpay instance
 const razorpayInstance = new Razorpay({
@@ -43,8 +44,10 @@ exports.createRazorpayOrder = async (req, res, next) => {
       });
     }
 
-    // Validate amount
-    if (amount <= 0) {
+    // Validate and round amount to 2 decimal places
+    const roundedAmount = validateAndRoundMoney(amount, 'payment amount');
+    
+    if (roundedAmount <= 0) {
       return res.status(400).json({
         success: false,
         message: 'Amount must be greater than 0',
@@ -73,11 +76,14 @@ exports.createRazorpayOrder = async (req, res, next) => {
       });
     }
 
+    // Round order final total for comparison
+    const roundedOrderTotal = roundMoney(order.finalTotal);
+    
     // Verify amount matches order final total (allow small difference for rounding)
-    if (Math.abs(amount - order.finalTotal) > 0.01) {
+    if (Math.abs(roundedAmount - roundedOrderTotal) > 0.01) {
       return res.status(400).json({
         success: false,
-        message: `Payment amount (₹${amount}) does not match order total (₹${order.finalTotal})`,
+        message: `Payment amount (₹${roundedAmount}) does not match order total (₹${roundedOrderTotal})`,
         error: 'VALIDATION_ERROR'
       });
     }
@@ -91,20 +97,28 @@ exports.createRazorpayOrder = async (req, res, next) => {
       });
     }
 
-    // Create payment record first
+    // Create payment record first (use rounded amount)
     const payment = await Payment.create({
       orderId: order._id,
       userId,
-      amount: amount,
+      amount: roundedAmount,
       paymentMethod: 'razorpay',
       paymentGateway: 'razorpay',
       status: 'Pending'
     });
 
     try {
-      // Create Razorpay order
+      // Create Razorpay order - convert rounded rupees to paise (multiply by 100)
+      // Use rounded amount to ensure integer paise value
+      const amountInPaise = Math.round(roundedAmount * 100);
+      
+      // Ensure it's an integer (no decimals in paise)
+      if (!Number.isInteger(amountInPaise)) {
+        throw new Error('Invalid amount for payment gateway - must be an integer in paise');
+      }
+
       const razorpayOrder = await razorpayInstance.orders.create({
-        amount: Math.round(amount * 100), // Convert to paise
+        amount: amountInPaise, // Amount in paise (integer)
         currency: 'INR',
         receipt: payment.paymentId,
         notes: {
@@ -124,7 +138,7 @@ exports.createRazorpayOrder = async (req, res, next) => {
         data: {
           paymentId: payment.paymentId,
           orderId: order.orderId,
-          amount: amount,
+          amount: roundedAmount, // Return rounded amount
           currency: 'INR',
           razorpayOrderId: razorpayOrder.id,
           key: process.env.RAZORPAY_KEY_ID // Frontend needs this to initialize Razorpay
@@ -173,15 +187,18 @@ exports.initiatePayment = async (req, res, next) => {
       });
     }
 
+    // Validate and round amount to 2 decimal places
+    const roundedAmount = validateAndRoundMoney(amount, 'payment amount');
+    
     // Calculate amounts
-    let paymentAmount = amount;
+    let paymentAmount = roundedAmount;
     if (paymentMethod === 'advance') {
       // For advance payment, use ₹999 as fixed advance amount
       // The discount is applied to the total order amount, not the advance
-      paymentAmount = Math.min(amount, 999); // Fixed ₹999 advance
+      paymentAmount = roundMoney(Math.min(roundedAmount, 999)); // Fixed ₹999 advance
     }
 
-    // Create payment record
+    // Create payment record (use rounded amount)
     const payment = await Payment.create({
       orderId: order._id,
       userId,
@@ -193,8 +210,16 @@ exports.initiatePayment = async (req, res, next) => {
 
     // Create Razorpay order
     try {
+      // Convert rounded rupees to paise (multiply by 100)
+      const amountInPaise = Math.round(paymentAmount * 100);
+      
+      // Ensure it's an integer (no decimals in paise)
+      if (!Number.isInteger(amountInPaise)) {
+        throw new Error('Invalid amount for payment gateway - must be an integer in paise');
+      }
+
       const razorpayOrder = await razorpayInstance.orders.create({
-        amount: Math.round(paymentAmount * 100), // in paise
+        amount: amountInPaise, // Amount in paise (integer)
         currency: 'INR',
         receipt: payment.paymentId,
         notes: {
@@ -442,11 +467,15 @@ exports.processPayment = async (req, res, next) => {
       });
     }
 
-    // Verify amount matches order final total
-    if (Math.abs(amount - order.finalTotal) > 0.01) {
+    // Validate and round amount to 2 decimal places
+    const roundedAmount = validateAndRoundMoney(amount, 'payment amount');
+    const roundedOrderTotal = roundMoney(order.finalTotal);
+    
+    // Verify amount matches order final total (using rounded values)
+    if (Math.abs(roundedAmount - roundedOrderTotal) > 0.01) {
       return res.status(400).json({
         success: false,
-        message: `Payment amount (₹${amount}) does not match order total (₹${order.finalTotal})`,
+        message: `Payment amount (₹${roundedAmount}) does not match order total (₹${roundedOrderTotal})`,
         error: 'VALIDATION_ERROR'
       });
     }
@@ -512,11 +541,11 @@ exports.processPayment = async (req, res, next) => {
           });
         }
       } else {
-        // Create new payment record
+        // Create new payment record (use rounded amount)
         payment = await Payment.create({
           orderId: order._id,
           userId,
-          amount,
+          amount: roundedAmount, // Use rounded amount
           paymentMethod: paymentMethod || 'razorpay',
           paymentGateway: 'razorpay',
           gatewayOrderId: razorpayOrderId,
@@ -753,30 +782,32 @@ exports.calculatePayment = async (req, res, next) => {
     // Calculate discount using dynamic settings
     // Order: Product Discount (already in order.total) → Payment Discount → Coupon Discount
     // order.total is subtotal after product discounts
+    // Round order total first
+    const roundedOrderTotal = roundMoney(order.total);
     let discountAmount = 0;
-    let finalAmount = order.total;
+    let finalAmount = roundedOrderTotal;
 
     if (paymentMethod === 'payNow' || paymentMethod === 'full') {
       // Pay Now (full payment) - use instantPaymentDiscount
       const Settings = require('../models/Settings');
       const settings = await Settings.getSettings();
       const discountPercentage = settings.instantPaymentDiscount / 100;
-      discountAmount = order.total * discountPercentage;
-      finalAmount = order.total - discountAmount;
+      discountAmount = roundMoney(roundedOrderTotal * discountPercentage);
+      finalAmount = roundMoney(roundedOrderTotal - discountAmount);
     } else if (paymentMethod === 'advance') {
       // Pay Advance - use advancePaymentDiscount
       const Settings = require('../models/Settings');
       const settings = await Settings.getSettings();
       const discountPercentage = settings.advancePaymentDiscount / 100;
-      discountAmount = order.total * discountPercentage;
-      finalAmount = order.total - discountAmount;
+      discountAmount = roundMoney(roundedOrderTotal * discountPercentage);
+      finalAmount = roundMoney(roundedOrderTotal - discountAmount);
     }
     // payLater has no payment discount (0%)
 
     res.json({
       success: true,
       data: {
-        totalAmount: order.total,
+        totalAmount: roundedOrderTotal, // Return rounded values
         discount: discountAmount,
         discountAmount,
         finalAmount,
