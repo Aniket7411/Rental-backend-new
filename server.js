@@ -57,10 +57,21 @@ if (process.env.NODE_ENV !== 'production') {
   }
 }
 
-// Always allow production frontend
-if (allowedOrigins && !allowedOrigins.includes('https://rental-ac-frontend.vercel.app')) {
-  allowedOrigins.push('https://rental-ac-frontend.vercel.app');
+// Always allow production frontends
+const productionFrontends = [
+  'https://rental-ac-frontend.vercel.app',
+  'https://ashenterprises.in'
+];
+
+if (!allowedOrigins) {
+  allowedOrigins = [];
 }
+
+productionFrontends.forEach(frontend => {
+  if (!allowedOrigins.includes(frontend)) {
+    allowedOrigins.push(frontend);
+  }
+});
 
 app.use(cors({
   origin: (origin, callback) => {
