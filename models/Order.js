@@ -146,8 +146,28 @@ const orderSchema = new mongoose.Schema({
   },
   paymentStatus: {
     type: String,
-    enum: ['paid', 'pending'],
+    enum: ['paid', 'pending', 'advance_paid', 'partial', 'refunded'],
     default: 'pending'
+  },
+  priorityServiceScheduling: {
+    type: Boolean,
+    default: false,
+    description: 'Indicates if order has priority service scheduling (true for advance payment orders)'
+  },
+  advanceAmount: {
+    type: Number,
+    default: null,
+    min: 0,
+    set: (v) => v !== null && v !== undefined ? roundMoney(v) : null,
+    get: (v) => v !== null && v !== undefined ? roundMoney(v) : null,
+    description: 'Advance payment amount (₹999) for advance payment orders'
+  },
+  remainingAmount: {
+    type: Number,
+    default: null,
+    set: (v) => v !== null && v !== undefined ? roundMoney(v) : null,
+    get: (v) => v !== null && v !== undefined ? roundMoney(v) : null,
+    description: 'Remaining amount to be paid after installation for advance payment orders'
   },
   status: {
     type: String,
@@ -213,6 +233,14 @@ orderSchema.pre('save', async function (next) {
   this.couponDiscount = roundMoney(this.couponDiscount || 0);
   this.paymentDiscount = roundMoney(this.paymentDiscount || 0);
   this.finalTotal = roundMoney(this.finalTotal);
+  
+  // Round advance payment fields if they exist
+  if (this.advanceAmount !== null && this.advanceAmount !== undefined) {
+    this.advanceAmount = roundMoney(this.advanceAmount);
+  }
+  if (this.remainingAmount !== null && this.remainingAmount !== undefined) {
+    this.remainingAmount = roundMoney(this.remainingAmount);
+  }
   
   // Round monetary fields in items array
   if (this.items && Array.isArray(this.items)) {

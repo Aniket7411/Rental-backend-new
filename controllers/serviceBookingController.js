@@ -224,10 +224,10 @@ exports.getMyServiceBookings = async (req, res, next) => {
     // Calculate pagination
     const skip = (parseInt(page) - 1) * parseInt(limit);
 
-    // Get bookings with pagination
+    // Get bookings with pagination - prioritize bookings with priorityScheduling
     const bookings = await ServiceBooking.find(query)
       .populate('serviceId', 'title description price image')
-      .sort({ createdAt: -1 })
+      .sort({ priorityScheduling: -1, createdAt: -1 }) // Sort by priority first, then by creation date
       .skip(skip)
       .limit(parseInt(limit));
 
@@ -274,11 +274,11 @@ exports.getAllServiceBookings = async (req, res, next) => {
     // Calculate pagination
     const skip = (parseInt(page) - 1) * parseInt(limit);
 
-    // Get bookings with pagination
+    // Get bookings with pagination - prioritize bookings with priorityScheduling
     const bookings = await ServiceBooking.find(query)
       .populate('serviceId', 'title')
       .populate('userId', 'name email phone')
-      .sort({ createdAt: -1 })
+      .sort({ priorityScheduling: -1, createdAt: -1 }) // Sort by priority first, then by creation date
       .skip(skip)
       .limit(parseInt(limit));
 

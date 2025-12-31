@@ -76,16 +76,31 @@ exports.createRazorpayOrder = async (req, res, next) => {
       });
     }
 
-    // Round order final total for comparison
-    const roundedOrderTotal = roundMoney(order.finalTotal);
+    // Handle advance payment: For payAdvance orders, payment amount should be ₹999
+    const FIXED_ADVANCE_AMOUNT = 999;
+    let paymentAmount = roundedAmount;
     
-    // Verify amount matches order final total (allow small difference for rounding)
-    if (Math.abs(roundedAmount - roundedOrderTotal) > 0.01) {
-      return res.status(400).json({
-        success: false,
-        message: `Payment amount (₹${roundedAmount}) does not match order total (₹${roundedOrderTotal})`,
-        error: 'VALIDATION_ERROR'
-      });
+    if (order.paymentOption === 'payAdvance') {
+      // For advance payment, the amount should be ₹999
+      if (Math.abs(roundedAmount - FIXED_ADVANCE_AMOUNT) > 0.01) {
+        return res.status(400).json({
+          success: false,
+          message: `For advance payment orders, amount must be ₹${FIXED_ADVANCE_AMOUNT}`,
+          error: 'VALIDATION_ERROR'
+        });
+      }
+      paymentAmount = roundMoney(FIXED_ADVANCE_AMOUNT);
+    } else {
+      // For other payment options, verify amount matches order final total
+      const roundedOrderTotal = roundMoney(order.finalTotal);
+      if (Math.abs(roundedAmount - roundedOrderTotal) > 0.01) {
+        return res.status(400).json({
+          success: false,
+          message: `Payment amount (₹${roundedAmount}) does not match order total (₹${roundedOrderTotal})`,
+          error: 'VALIDATION_ERROR'
+        });
+      }
+      paymentAmount = roundedAmount;
     }
 
     // Check if Razorpay credentials are configured
@@ -97,20 +112,20 @@ exports.createRazorpayOrder = async (req, res, next) => {
       });
     }
 
-    // Create payment record first (use rounded amount)
+    // Create payment record first (use paymentAmount which is rounded and validated)
     const payment = await Payment.create({
       orderId: order._id,
       userId,
-      amount: roundedAmount,
-      paymentMethod: 'razorpay',
+      amount: paymentAmount, // Use paymentAmount (₹999 for advance, full amount for others)
+      paymentMethod: order.paymentOption === 'payAdvance' ? 'advance' : 'razorpay',
       paymentGateway: 'razorpay',
       status: 'Pending'
     });
 
     try {
       // Create Razorpay order - convert rounded rupees to paise (multiply by 100)
-      // Use rounded amount to ensure integer paise value
-      const amountInPaise = Math.round(roundedAmount * 100);
+      // Use paymentAmount (₹999 for advance payment, or full amount for others)
+      const amountInPaise = Math.round(paymentAmount * 100);
       
       // Ensure it's an integer (no decimals in paise)
       if (!Number.isInteger(amountInPaise)) {
@@ -138,7 +153,7 @@ exports.createRazorpayOrder = async (req, res, next) => {
         data: {
           paymentId: payment.paymentId,
           orderId: order.orderId,
-          amount: roundedAmount, // Return rounded amount
+          amount: paymentAmount, // Return payment amount (₹999 for advance, full amount for others)
           currency: 'INR',
           razorpayOrderId: razorpayOrder.id,
           key: process.env.RAZORPAY_KEY_ID // Frontend needs this to initialize Razorpay
@@ -358,8 +373,18 @@ exports.verifyPayment = async (req, res, next) => {
       // Update order payment status
       const order = await Order.findById(payment.orderId);
       if (order) {
-        order.paymentStatus = 'paid';
-        order.status = 'confirmed'; // Update order status to confirmed
+        // For advance payment orders, set status to 'advance_paid' or 'partial'
+        if (order.paymentOption === 'payAdvance') {
+          order.paymentStatus = 'advance_paid';
+          // Order status remains 'pending' until full payment is received
+          // Only update to 'confirmed' if remaining amount is 0
+          if (order.remainingAmount !== null && order.remainingAmount <= 0) {
+            order.status = 'confirmed';
+          }
+        } else {
+          order.paymentStatus = 'paid';
+          order.status = 'confirmed'; // Update order status to confirmed for full payment
+        }
         order.paymentDetails = {
           paymentId: payment.paymentId,
           transactionId: payment.transactionId,
@@ -389,7 +414,7 @@ exports.verifyPayment = async (req, res, next) => {
         data: {
           orderId: order?.orderId,
           paymentId: payment.paymentId,
-          paymentStatus: 'paid', // Per handoff doc
+          paymentStatus: order?.paymentStatus || 'paid', // Return actual payment status (advance_paid for advance payments)
           verifiedAt: payment.paidAt // Per handoff doc
         }
       });
@@ -469,15 +494,40 @@ exports.processPayment = async (req, res, next) => {
 
     // Validate and round amount to 2 decimal places
     const roundedAmount = validateAndRoundMoney(amount, 'payment amount');
-    const roundedOrderTotal = roundMoney(order.finalTotal);
     
-    // Verify amount matches order final total (using rounded values)
-    if (Math.abs(roundedAmount - roundedOrderTotal) > 0.01) {
-      return res.status(400).json({
-        success: false,
-        message: `Payment amount (₹${roundedAmount}) does not match order total (₹${roundedOrderTotal})`,
-        error: 'VALIDATION_ERROR'
-      });
+    // Handle advance payment orders
+    if (order.paymentOption === 'payAdvance') {
+      if (order.paymentStatus === 'advance_paid' && order.remainingAmount > 0) {
+        // This is a payment for the remaining amount after advance payment
+        const roundedRemaining = roundMoney(order.remainingAmount);
+        if (Math.abs(roundedAmount - roundedRemaining) > 0.01) {
+          return res.status(400).json({
+            success: false,
+            message: `Payment amount (₹${roundedAmount}) does not match remaining amount (₹${roundedRemaining})`,
+            error: 'VALIDATION_ERROR'
+          });
+        }
+      } else {
+        // First payment for advance payment order should be ₹999
+        const FIXED_ADVANCE_AMOUNT = 999;
+        if (Math.abs(roundedAmount - FIXED_ADVANCE_AMOUNT) > 0.01) {
+          return res.status(400).json({
+            success: false,
+            message: `For advance payment orders, amount must be ₹${FIXED_ADVANCE_AMOUNT}`,
+            error: 'VALIDATION_ERROR'
+          });
+        }
+      }
+    } else {
+      // For other payment options, verify amount matches order final total
+      const roundedOrderTotal = roundMoney(order.finalTotal);
+      if (Math.abs(roundedAmount - roundedOrderTotal) > 0.01) {
+        return res.status(400).json({
+          success: false,
+          message: `Payment amount (₹${roundedAmount}) does not match order total (₹${roundedOrderTotal})`,
+          error: 'VALIDATION_ERROR'
+        });
+      }
     }
 
     // Extract Razorpay payment details
@@ -557,8 +607,17 @@ exports.processPayment = async (req, res, next) => {
       }
 
       // Update order payment status
-      order.paymentStatus = 'paid';
-      order.status = 'confirmed';
+      // For advance payment orders, set status to 'advance_paid'
+      if (order.paymentOption === 'payAdvance') {
+        order.paymentStatus = 'advance_paid';
+        // Order status remains 'pending' until full payment is received
+        if (order.remainingAmount !== null && order.remainingAmount <= 0) {
+          order.status = 'confirmed';
+        }
+      } else {
+        order.paymentStatus = 'paid';
+        order.status = 'confirmed';
+      }
       order.paymentDetails = {
         paymentId: payment.paymentId,
         transactionId: payment.transactionId,
@@ -708,9 +767,17 @@ exports.razorpayWebhook = async (req, res, next) => {
 
         // Update order
         const order = await Order.findById(payment.orderId);
-        if (order && order.paymentStatus !== 'paid') {
-          order.paymentStatus = 'paid';
-          order.status = 'confirmed';
+        if (order && order.paymentStatus !== 'paid' && order.paymentStatus !== 'advance_paid') {
+          // For advance payment orders, set status to 'advance_paid'
+          if (order.paymentOption === 'payAdvance') {
+            order.paymentStatus = 'advance_paid';
+            if (order.remainingAmount !== null && order.remainingAmount <= 0) {
+              order.status = 'confirmed';
+            }
+          } else {
+            order.paymentStatus = 'paid';
+            order.status = 'confirmed';
+          }
           order.paymentDetails = {
             paymentId: payment.paymentId,
             transactionId: payment.transactionId,

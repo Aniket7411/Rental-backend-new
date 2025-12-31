@@ -152,6 +152,11 @@ const serviceBookingSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Order',
     default: null
+  },
+  priorityScheduling: {
+    type: Boolean,
+    default: false,
+    description: 'Indicates if booking has priority scheduling (true for advance payment orders)'
   }
 }, {
   timestamps: true
@@ -173,6 +178,8 @@ serviceBookingSchema.index({ createdAt: -1 });
 serviceBookingSchema.index({ date: 1 });
 serviceBookingSchema.index({ time: 1 });
 serviceBookingSchema.index({ serviceId: 1 });
+// Index for priority scheduling queries
+serviceBookingSchema.index({ priorityScheduling: 1, date: 1, status: 1 });
 
 module.exports = mongoose.model('ServiceBooking', serviceBookingSchema);
 

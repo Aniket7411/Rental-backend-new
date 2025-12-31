@@ -145,14 +145,17 @@ exports.createOrder = async (req, res, next) => {
       discount, // Total discount (product + payment + coupon)
       couponCode,
       couponDiscount,
-      paymentDiscount, // Payment option discount (Pay Now discount)
+      paymentDiscount, // Payment option discount (Pay Now or Pay Advance discount)
       finalTotal,
       customerInfo,
       deliveryAddresses,
       notes,
       orderDate,
       shippingAddress,
-      billingAddress
+      billingAddress,
+      priorityServiceScheduling,
+      advanceAmount,
+      remainingAmount
     } = req.body;
 
     // Use customerInfo.userId if provided, otherwise use authenticated user
@@ -674,8 +677,96 @@ exports.createOrder = async (req, res, next) => {
       finalCorrectedFinalTotal = verificationTotal;
     }
 
+    // Handle advance payment validation and logic
+    let orderPriorityServiceScheduling = false;
+    let orderAdvanceAmount = null;
+    let orderRemainingAmount = null;
+
+    if (paymentOption === 'payAdvance') {
+      // Validate priorityServiceScheduling - must be true for advance payment
+      if (priorityServiceScheduling !== undefined && priorityServiceScheduling !== true) {
+        return res.status(400).json({
+          success: false,
+          message: 'priorityServiceScheduling must be true when paymentOption is payAdvance',
+          error: 'VALIDATION_ERROR'
+        });
+      }
+      orderPriorityServiceScheduling = true;
+
+      // Validate advanceAmount - should be exactly 999
+      const FIXED_ADVANCE_AMOUNT = 999;
+      if (advanceAmount !== undefined) {
+        const roundedAdvance = validateAndRoundMoney(advanceAmount, 'advanceAmount');
+        if (Math.abs(roundedAdvance - FIXED_ADVANCE_AMOUNT) > 0.01) {
+          return res.status(400).json({
+            success: false,
+            message: `advanceAmount must be exactly ₹${FIXED_ADVANCE_AMOUNT} for advance payment orders`,
+            error: 'VALIDATION_ERROR'
+          });
+        }
+        orderAdvanceAmount = roundMoney(FIXED_ADVANCE_AMOUNT);
+      } else {
+        orderAdvanceAmount = roundMoney(FIXED_ADVANCE_AMOUNT);
+      }
+
+      // Calculate remaining amount
+      // If finalTotal < 999, set remainingAmount to 0 (advance covers full amount)
+      if (finalCorrectedFinalTotal < orderAdvanceAmount) {
+        orderRemainingAmount = 0;
+        // Note: In this case, the advance amount exceeds the final total
+        // Consider adjusting the advance amount or refunding excess
+      } else {
+        orderRemainingAmount = roundMoney(finalCorrectedFinalTotal - orderAdvanceAmount);
+      }
+
+      // Validate remainingAmount if provided
+      if (remainingAmount !== undefined) {
+        const roundedRemaining = validateAndRoundMoney(remainingAmount, 'remainingAmount');
+        const calculatedRemaining = roundMoney(finalCorrectedFinalTotal - orderAdvanceAmount);
+        if (Math.abs(roundedRemaining - calculatedRemaining) > 0.01) {
+          console.warn(`Remaining amount mismatch. Provided: ${roundedRemaining}, Calculated: ${calculatedRemaining}. Using calculated value.`);
+          // Use calculated value as source of truth
+          orderRemainingAmount = calculatedRemaining >= 0 ? calculatedRemaining : 0;
+        } else {
+          orderRemainingAmount = roundedRemaining >= 0 ? roundedRemaining : 0;
+        }
+      }
+    } else {
+      // For non-advance payment options, validate that advance payment fields are not set
+      if (priorityServiceScheduling !== undefined && priorityServiceScheduling !== false) {
+        return res.status(400).json({
+          success: false,
+          message: 'priorityServiceScheduling must be false for non-advance payment options',
+          error: 'VALIDATION_ERROR'
+        });
+      }
+      if (advanceAmount !== undefined && advanceAmount !== null) {
+        return res.status(400).json({
+          success: false,
+          message: 'advanceAmount must be null for non-advance payment options',
+          error: 'VALIDATION_ERROR'
+        });
+      }
+      if (remainingAmount !== undefined && remainingAmount !== null) {
+        return res.status(400).json({
+          success: false,
+          message: 'remainingAmount must be null for non-advance payment options',
+          error: 'VALIDATION_ERROR'
+        });
+      }
+    }
+
     // Set payment status based on payment option
-    const finalPaymentStatus = paymentStatus || (paymentOption === 'payNow' ? 'paid' : 'pending');
+    let finalPaymentStatus;
+    if (paymentStatus) {
+      finalPaymentStatus = paymentStatus;
+    } else if (paymentOption === 'payNow') {
+      finalPaymentStatus = 'paid';
+    } else if (paymentOption === 'payAdvance') {
+      finalPaymentStatus = 'pending'; // Advance payment not yet received
+    } else {
+      finalPaymentStatus = 'pending';
+    }
 
     // Set order status based on payment status
     // If payNow and payment is successful, status should be "confirmed", otherwise "pending"
@@ -708,6 +799,9 @@ exports.createOrder = async (req, res, next) => {
       paymentOption,
       paymentStatus: finalPaymentStatus,
       status: orderStatus,
+      priorityServiceScheduling: orderPriorityServiceScheduling,
+      advanceAmount: orderAdvanceAmount,
+      remainingAmount: orderRemainingAmount,
       customerInfo: customerInfo || null,
       deliveryAddresses: deliveryAddresses || [],
       notes: notes || '',
