@@ -23,7 +23,15 @@ const serviceSchema = new mongoose.Schema({
   },
   badge: {
     type: String,
-    enum: ['Visit Within 1 Hour', 'Most Booked', 'Power Saver', null],
+    enum: [
+      'Visit within 1 hour',
+      'Visit within 2 hours',
+      'Visit within 3 hours',
+      'Same Day Visit',
+      'Most Booked',
+      'Power Saver',
+      null
+    ],
     default: null
   },
   image: {

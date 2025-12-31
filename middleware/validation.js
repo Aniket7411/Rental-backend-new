@@ -260,8 +260,17 @@ exports.validateService = [
     .withMessage('Original price must be a positive number'),
   body('badge')
     .optional()
-    .isIn(['Visit Within 1 Hour', 'Most Booked', 'Power Saver', null, ''])
-    .withMessage('Badge must be one of: Visit Within 1 Hour, Most Booked, Power Saver'),
+    .isIn([
+      'Visit within 1 hour',
+      'Visit within 2 hours',
+      'Visit within 3 hours',
+      'Same Day Visit',
+      'Most Booked',
+      'Power Saver',
+      null,
+      ''
+    ])
+    .withMessage('Badge must be one of: Visit within 1 hour, Visit within 2 hours, Visit within 3 hours, Same Day Visit, Most Booked, Power Saver'),
   body('image')
     .optional({ nullable: true, checkFalsy: true })
     .custom((value) => {
