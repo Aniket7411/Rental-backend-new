@@ -9,7 +9,8 @@ exports.getPublicSettings = async (req, res, next) => {
       success: true,
       data: {
         instantPaymentDiscount: settings.instantPaymentDiscount,
-        advancePaymentDiscount: settings.advancePaymentDiscount
+        advancePaymentDiscount: settings.advancePaymentDiscount,
+        advancePaymentAmount: settings.advancePaymentAmount || 500
       }
     });
   } catch (error) {
@@ -19,7 +20,8 @@ exports.getPublicSettings = async (req, res, next) => {
       success: true,
       data: {
         instantPaymentDiscount: 10,
-        advancePaymentDiscount: 5
+        advancePaymentDiscount: 5,
+        advancePaymentAmount: 500
       }
     });
   }
@@ -35,6 +37,7 @@ exports.getSettings = async (req, res, next) => {
       data: {
         instantPaymentDiscount: settings.instantPaymentDiscount,
         advancePaymentDiscount: settings.advancePaymentDiscount,
+        advancePaymentAmount: settings.advancePaymentAmount || 500,
         updatedAt: settings.updatedAt,
         updatedBy: settings.updatedBy
       }
@@ -52,7 +55,7 @@ exports.getSettings = async (req, res, next) => {
 // Update Settings (Admin)
 exports.updateSettings = async (req, res, next) => {
   try {
-    const { instantPaymentDiscount, advancePaymentDiscount } = req.body;
+    const { instantPaymentDiscount, advancePaymentDiscount, advancePaymentAmount } = req.body;
 
     // Build update object (only include fields that are provided - partial updates)
     const updateData = {};
@@ -81,11 +84,31 @@ exports.updateSettings = async (req, res, next) => {
       updateData.advancePaymentDiscount = discount;
     }
 
+    if (advancePaymentAmount !== undefined && advancePaymentAmount !== null) {
+      const amount = parseFloat(advancePaymentAmount);
+      if (isNaN(amount) || amount < 1) {
+        return res.status(400).json({
+          success: false,
+          message: 'advancePaymentAmount must be a positive number (minimum 1)',
+          error: 'VALIDATION_ERROR'
+        });
+      }
+      // Optional: Set reasonable upper limit (e.g., 10000)
+      if (amount > 10000) {
+        return res.status(400).json({
+          success: false,
+          message: 'advancePaymentAmount must be less than or equal to 10000',
+          error: 'VALIDATION_ERROR'
+        });
+      }
+      updateData.advancePaymentAmount = amount;
+    }
+
     // At least one field must be provided
     if (Object.keys(updateData).length === 0) {
       return res.status(400).json({
         success: false,
-        message: 'At least one discount field must be provided',
+        message: 'At least one settings field must be provided',
         error: 'VALIDATION_ERROR'
       });
     }
@@ -102,6 +125,7 @@ exports.updateSettings = async (req, res, next) => {
       data: {
         instantPaymentDiscount: settings.instantPaymentDiscount,
         advancePaymentDiscount: settings.advancePaymentDiscount,
+        advancePaymentAmount: settings.advancePaymentAmount || 500,
         updatedAt: settings.updatedAt,
         updatedBy: settings.updatedBy
       }

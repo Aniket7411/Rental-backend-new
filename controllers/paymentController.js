@@ -76,20 +76,24 @@ exports.createRazorpayOrder = async (req, res, next) => {
       });
     }
 
-    // Handle advance payment: For payAdvance orders, payment amount should be ₹999
-    const FIXED_ADVANCE_AMOUNT = 999;
+    // Handle advance payment: For payAdvance orders, payment amount should match settings
     let paymentAmount = roundedAmount;
     
     if (order.paymentOption === 'payAdvance') {
-      // For advance payment, the amount should be ₹999
-      if (Math.abs(roundedAmount - FIXED_ADVANCE_AMOUNT) > 0.01) {
+      // Get settings for advance payment amount
+      const Settings = require('../models/Settings');
+      const settings = await Settings.getSettings();
+      const expectedAdvanceAmount = settings.advancePaymentAmount || 500;
+      
+      // For advance payment, the amount should match advancePaymentAmount from settings
+      if (Math.abs(roundedAmount - expectedAdvanceAmount) > 0.01) {
         return res.status(400).json({
           success: false,
-          message: `For advance payment orders, amount must be ₹${FIXED_ADVANCE_AMOUNT}`,
+          message: `For advance payment orders, amount must be ₹${expectedAdvanceAmount} (current advance payment amount setting)`,
           error: 'VALIDATION_ERROR'
         });
       }
-      paymentAmount = roundMoney(FIXED_ADVANCE_AMOUNT);
+      paymentAmount = roundMoney(expectedAdvanceAmount);
     } else {
       // For other payment options, verify amount matches order final total
       const roundedOrderTotal = roundMoney(order.finalTotal);
@@ -208,9 +212,14 @@ exports.initiatePayment = async (req, res, next) => {
     // Calculate amounts
     let paymentAmount = roundedAmount;
     if (paymentMethod === 'advance') {
-      // For advance payment, use ₹999 as fixed advance amount
+      // Get settings for advance payment amount
+      const Settings = require('../models/Settings');
+      const settings = await Settings.getSettings();
+      const expectedAdvanceAmount = settings.advancePaymentAmount || 500;
+      
+      // For advance payment, use advancePaymentAmount from settings
       // The discount is applied to the total order amount, not the advance
-      paymentAmount = roundMoney(Math.min(roundedAmount, 999)); // Fixed ₹999 advance
+      paymentAmount = roundMoney(Math.min(roundedAmount, expectedAdvanceAmount));
     }
 
     // Create payment record (use rounded amount)
@@ -508,12 +517,16 @@ exports.processPayment = async (req, res, next) => {
           });
         }
       } else {
-        // First payment for advance payment order should be ₹999
-        const FIXED_ADVANCE_AMOUNT = 999;
-        if (Math.abs(roundedAmount - FIXED_ADVANCE_AMOUNT) > 0.01) {
+        // Get settings for advance payment amount
+        const Settings = require('../models/Settings');
+        const settings = await Settings.getSettings();
+        const expectedAdvanceAmount = settings.advancePaymentAmount || 500;
+        
+        // First payment for advance payment order should match advancePaymentAmount from settings
+        if (Math.abs(roundedAmount - expectedAdvanceAmount) > 0.01) {
           return res.status(400).json({
             success: false,
-            message: `For advance payment orders, amount must be ₹${FIXED_ADVANCE_AMOUNT}`,
+            message: `For advance payment orders, amount must be ₹${expectedAdvanceAmount} (current advance payment amount setting)`,
             error: 'VALIDATION_ERROR'
           });
         }
@@ -869,7 +882,6 @@ exports.calculatePayment = async (req, res, next) => {
       discountAmount = roundMoney(roundedOrderTotal * discountPercentage);
       finalAmount = roundMoney(roundedOrderTotal - discountAmount);
     }
-    // payLater has no payment discount (0%)
 
     res.json({
       success: true,

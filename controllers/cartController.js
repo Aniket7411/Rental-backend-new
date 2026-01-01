@@ -51,7 +51,7 @@ exports.getCart = async (req, res, next) => {
 // Add Rental to Cart
 exports.addRentalToCart = async (req, res, next) => {
   try {
-    const { productId, quantity = 1, paymentOption = 'payLater' } = req.body;
+    const { productId, quantity = 1, paymentOption = 'payAdvance' } = req.body;
     const userId = req.user._id || req.user.id;
 
     if (!productId) {
@@ -124,7 +124,7 @@ exports.addServiceToCart = async (req, res, next) => {
     }
 
     // Validate booking details
-    const { date, time, address, addressType, contactName, contactPhone, paymentOption = 'payLater' } = bookingDetails;
+    const { date, time, address, addressType, contactName, contactPhone, paymentOption = 'payAdvance' } = bookingDetails;
 
     if (!date || !time || !address) {
       return res.status(400).json({

@@ -15,6 +15,12 @@ const settingsSchema = new mongoose.Schema({
     max: 100,
     required: true
   },
+  advancePaymentAmount: {
+    type: Number,
+    default: 500,
+    min: 1,
+    required: true
+  },
   updatedBy: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User'
@@ -29,8 +35,14 @@ settingsSchema.statics.getSettings = async function() {
   if (!settings) {
     settings = await this.create({ 
       instantPaymentDiscount: 10,
-      advancePaymentDiscount: 5
+      advancePaymentDiscount: 5,
+      advancePaymentAmount: 500
     });
+  }
+  // Ensure advancePaymentAmount exists for existing settings (migration)
+  if (!settings.advancePaymentAmount) {
+    settings.advancePaymentAmount = 500;
+    await settings.save();
   }
   return settings;
 };

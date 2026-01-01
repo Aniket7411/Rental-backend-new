@@ -205,10 +205,10 @@ exports.createOrder = async (req, res, next) => {
       });
     }
 
-    if (!paymentOption || !['payNow', 'payLater', 'payAdvance'].includes(paymentOption)) {
+    if (!paymentOption || !['payNow', 'payAdvance'].includes(paymentOption)) {
       return res.status(400).json({
         success: false,
-        message: 'Payment option must be "payNow", "payLater", or "payAdvance"',
+        message: 'Payment option must be "payNow" or "payAdvance"',
         error: 'VALIDATION_ERROR'
       });
     }
@@ -517,7 +517,6 @@ exports.createOrder = async (req, res, next) => {
       const discountPercentage = settings.advancePaymentDiscount / 100;
       calculatedPaymentDiscount = roundMoney(calculatedTotal * discountPercentage);
     }
-    // payLater has no payment discount (0%)
 
     // Validate and apply coupon discount if provided
     let calculatedCouponDiscount = 0;
@@ -683,6 +682,11 @@ exports.createOrder = async (req, res, next) => {
     let orderRemainingAmount = null;
 
     if (paymentOption === 'payAdvance') {
+      // Get settings for advance payment amount
+      const Settings = require('../models/Settings');
+      const settings = await Settings.getSettings();
+      const expectedAdvanceAmount = settings.advancePaymentAmount || 500;
+
       // Validate priorityServiceScheduling - must be true for advance payment
       if (priorityServiceScheduling !== undefined && priorityServiceScheduling !== true) {
         return res.status(400).json({
@@ -693,20 +697,19 @@ exports.createOrder = async (req, res, next) => {
       }
       orderPriorityServiceScheduling = true;
 
-      // Validate advanceAmount - should be exactly 999
-      const FIXED_ADVANCE_AMOUNT = 999;
+      // Validate advanceAmount - should match advancePaymentAmount from settings
       if (advanceAmount !== undefined) {
         const roundedAdvance = validateAndRoundMoney(advanceAmount, 'advanceAmount');
-        if (Math.abs(roundedAdvance - FIXED_ADVANCE_AMOUNT) > 0.01) {
+        if (Math.abs(roundedAdvance - expectedAdvanceAmount) > 0.01) {
           return res.status(400).json({
             success: false,
-            message: `advanceAmount must be exactly ₹${FIXED_ADVANCE_AMOUNT} for advance payment orders`,
+            message: `advanceAmount must be exactly ₹${expectedAdvanceAmount} (current advance payment amount setting)`,
             error: 'VALIDATION_ERROR'
           });
         }
-        orderAdvanceAmount = roundMoney(FIXED_ADVANCE_AMOUNT);
+        orderAdvanceAmount = roundMoney(expectedAdvanceAmount);
       } else {
-        orderAdvanceAmount = roundMoney(FIXED_ADVANCE_AMOUNT);
+        orderAdvanceAmount = roundMoney(expectedAdvanceAmount);
       }
 
       // Calculate remaining amount

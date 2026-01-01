@@ -25,8 +25,8 @@ const cartSchema = new mongoose.Schema({
   },
   paymentOption: {
     type: String,
-    enum: ['payNow', 'payLater'],
-    default: 'payLater'
+    enum: ['payNow', 'payAdvance'],
+    default: 'payAdvance'
   },
   // For service items
   serviceId: {
@@ -51,7 +51,7 @@ const cartSchema = new mongoose.Schema({
     contactPhone: String,
     paymentOption: {
       type: String,
-      enum: ['payNow', 'payLater']
+      enum: ['payNow', 'payAdvance']
     }
   }
 }, {

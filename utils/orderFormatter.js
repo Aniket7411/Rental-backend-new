@@ -27,7 +27,10 @@ function formatOrderResponse(order) {
     discount: roundMoney(orderObj.discount || 0),
     couponDiscount: roundMoney(orderObj.couponDiscount || 0),
     paymentDiscount: roundMoney(orderObj.paymentDiscount || 0),
-    finalTotal: roundMoney(orderObj.finalTotal || 0)
+    finalTotal: roundMoney(orderObj.finalTotal || 0),
+    // Round advance payment fields if they exist
+    advanceAmount: orderObj.advanceAmount !== null && orderObj.advanceAmount !== undefined ? roundMoney(orderObj.advanceAmount) : null,
+    remainingAmount: orderObj.remainingAmount !== null && orderObj.remainingAmount !== undefined ? roundMoney(orderObj.remainingAmount) : null
   };
 
   // Round monetary fields in items array

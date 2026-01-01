@@ -141,7 +141,7 @@ const orderSchema = new mongoose.Schema({
   },
   paymentOption: {
     type: String,
-    enum: ['payNow', 'payLater', 'payAdvance'],
+    enum: ['payNow', 'payAdvance'],
     required: true
   },
   paymentStatus: {
