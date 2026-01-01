@@ -38,8 +38,7 @@ exports.getSettings = async (req, res, next) => {
         instantPaymentDiscount: settings.instantPaymentDiscount,
         advancePaymentDiscount: settings.advancePaymentDiscount,
         advancePaymentAmount: settings.advancePaymentAmount || 500,
-        updatedAt: settings.updatedAt,
-        updatedBy: settings.updatedBy
+        updatedAt: settings.updatedAt
       }
     });
   } catch (error) {
@@ -126,8 +125,7 @@ exports.updateSettings = async (req, res, next) => {
         instantPaymentDiscount: settings.instantPaymentDiscount,
         advancePaymentDiscount: settings.advancePaymentDiscount,
         advancePaymentAmount: settings.advancePaymentAmount || 500,
-        updatedAt: settings.updatedAt,
-        updatedBy: settings.updatedBy
+        updatedAt: settings.updatedAt
       }
     });
   } catch (error) {
