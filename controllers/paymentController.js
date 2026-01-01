@@ -36,11 +36,11 @@ exports.createRazorpayOrder = async (req, res, next) => {
     const { orderId, amount } = req.body;
     const userId = req.user._id || req.user.id;
 
-    if (!orderId || !amount) {
+    // Validate input
+    if (!orderId || amount === undefined || amount === null) {
       return res.status(400).json({
         success: false,
-        message: 'Order ID and amount are required',
-        error: 'VALIDATION_ERROR'
+        message: 'Order ID and amount are required'
       });
     }
 
@@ -76,47 +76,40 @@ exports.createRazorpayOrder = async (req, res, next) => {
       });
     }
 
-    // Determine expected payment amount from order (source of truth)
-    let expectedPaymentAmount;
-    if (order.paymentOption === 'payAdvance') {
-      // For advance payment orders, check if advance is already paid
-      if (order.paymentStatus === 'advance_paid' && order.remainingAmount > 0) {
-        // User is paying the remaining amount after advance payment
-        expectedPaymentAmount = order.remainingAmount;
-      } else {
-        // First payment for advance payment order
-        expectedPaymentAmount = order.advanceAmount || 0;
-      }
-    } else {
-      // For payNow, use order's finalTotal
-      expectedPaymentAmount = order.finalTotal || 0;
+    // ✅ FIX: Determine expected payment amount based on payment option
+    let expectedPaymentAmount = order.finalTotal || 0;
+    if (order.paymentOption === 'payAdvance' && order.advanceAmount) {
+      expectedPaymentAmount = order.advanceAmount;
     }
 
-    // Round expected amount to 2 decimal places for comparison
-    const roundedExpectedAmount = roundMoney(expectedPaymentAmount);
+    // ✅ FIX: Validate against expected amount (not always finalTotal)
+    const expectedAmount = parseFloat(expectedPaymentAmount);
 
-    // Validate that provided amount matches expected amount (with ±0.01 tolerance)
-    const difference = Math.abs(roundedAmount - roundedExpectedAmount);
+    // Round both to 2 decimal places for comparison
+    const roundedProvided = Math.round(roundedAmount * 100) / 100;
+    const roundedExpected = Math.round(expectedAmount * 100) / 100;
+
+    // Allow tolerance of ±0.01 (1 paise) for floating point precision
+    const difference = Math.abs(roundedProvided - roundedExpected);
+
     if (difference > 0.01) {
       return res.status(400).json({
         success: false,
         message: 'Payment amount mismatch',
         error: 'AMOUNT_MISMATCH',
         details: {
-          providedAmount: roundedAmount,
-          orderFinalTotal: order.paymentOption === 'payAdvance' 
-            ? (order.paymentStatus === 'advance_paid' ? order.remainingAmount : order.advanceAmount)
-            : order.finalTotal,
-          expectedAmount: roundedExpectedAmount,
+          providedAmount: roundedProvided,
+          orderFinalTotal: order.finalTotal, // Include for reference
+          expectedAmount: roundedExpected, // The amount that should be paid
           difference: difference,
-          orderId: order.orderId
+          orderId: order.orderId,
+          paymentOption: order.paymentOption // Include for debugging
         }
       });
     }
 
-    // Use order's stored value (not provided amount) when creating Razorpay order
-    // This ensures consistency - the order's value is the source of truth
-    const paymentAmount = roundedExpectedAmount;
+    // Use expected payment amount for Razorpay order creation
+    const paymentAmount = roundedExpected;
 
     // Check if Razorpay credentials are configured
     if (!process.env.RAZORPAY_KEY_ID || !process.env.RAZORPAY_KEY_SECRET) {
