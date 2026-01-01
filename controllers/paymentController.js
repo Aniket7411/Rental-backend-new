@@ -60,52 +60,63 @@ exports.createRazorpayOrder = async (req, res, next) => {
     const order = await findOrderByIdentifier(orderId, userId);
     
     if (!order) {
-      return res.status(404).json({
+      return res.status(400).json({
         success: false,
-        message: 'Order not found',
-        error: 'NOT_FOUND'
+        message: 'Order not found or does not belong to user',
+        error: 'ORDER_NOT_FOUND'
       });
     }
 
     // Check if order is already paid
-    if (order.paymentStatus === 'paid') {
+    if (order.paymentStatus === 'paid' || order.paymentStatus === 'completed') {
       return res.status(400).json({
         success: false,
-        message: 'Order is already paid',
-        error: 'VALIDATION_ERROR'
+        message: 'Order payment already completed',
+        error: 'ORDER_ALREADY_PAID'
       });
     }
 
-    // Handle advance payment: For payAdvance orders, payment amount should match settings
-    let paymentAmount = roundedAmount;
-    
+    // Determine expected payment amount from order (source of truth)
+    let expectedPaymentAmount;
     if (order.paymentOption === 'payAdvance') {
-      // Get settings for advance payment amount
-      const Settings = require('../models/Settings');
-      const settings = await Settings.getSettings();
-      const expectedAdvanceAmount = settings.advancePaymentAmount || 500;
-      
-      // For advance payment, the amount should match advancePaymentAmount from settings
-      if (Math.abs(roundedAmount - expectedAdvanceAmount) > 0.01) {
-        return res.status(400).json({
-          success: false,
-          message: `For advance payment orders, amount must be ₹${expectedAdvanceAmount} (current advance payment amount setting)`,
-          error: 'VALIDATION_ERROR'
-        });
+      // For advance payment orders, check if advance is already paid
+      if (order.paymentStatus === 'advance_paid' && order.remainingAmount > 0) {
+        // User is paying the remaining amount after advance payment
+        expectedPaymentAmount = order.remainingAmount;
+      } else {
+        // First payment for advance payment order
+        expectedPaymentAmount = order.advanceAmount || 0;
       }
-      paymentAmount = roundMoney(expectedAdvanceAmount);
     } else {
-      // For other payment options, verify amount matches order final total
-      const roundedOrderTotal = roundMoney(order.finalTotal);
-      if (Math.abs(roundedAmount - roundedOrderTotal) > 0.01) {
-        return res.status(400).json({
-          success: false,
-          message: `Payment amount (₹${roundedAmount}) does not match order total (₹${roundedOrderTotal})`,
-          error: 'VALIDATION_ERROR'
-        });
-      }
-      paymentAmount = roundedAmount;
+      // For payNow, use order's finalTotal
+      expectedPaymentAmount = order.finalTotal || 0;
     }
+
+    // Round expected amount to 2 decimal places for comparison
+    const roundedExpectedAmount = roundMoney(expectedPaymentAmount);
+
+    // Validate that provided amount matches expected amount (with ±0.01 tolerance)
+    const difference = Math.abs(roundedAmount - roundedExpectedAmount);
+    if (difference > 0.01) {
+      return res.status(400).json({
+        success: false,
+        message: 'Payment amount mismatch',
+        error: 'AMOUNT_MISMATCH',
+        details: {
+          providedAmount: roundedAmount,
+          orderFinalTotal: order.paymentOption === 'payAdvance' 
+            ? (order.paymentStatus === 'advance_paid' ? order.remainingAmount : order.advanceAmount)
+            : order.finalTotal,
+          expectedAmount: roundedExpectedAmount,
+          difference: difference,
+          orderId: order.orderId
+        }
+      });
+    }
+
+    // Use order's stored value (not provided amount) when creating Razorpay order
+    // This ensures consistency - the order's value is the source of truth
+    const paymentAmount = roundedExpectedAmount;
 
     // Check if Razorpay credentials are configured
     if (!process.env.RAZORPAY_KEY_ID || !process.env.RAZORPAY_KEY_SECRET) {
