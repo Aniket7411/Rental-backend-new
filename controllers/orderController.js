@@ -392,6 +392,15 @@ exports.createOrder = async (req, res, next) => {
         const productDetails = item.productDetails || productSnapshot;
         const deliveryInfo = item.deliveryInfo || {};
 
+        // Validate rental delivery info - address is required for rentals
+        if (!deliveryInfo.address || !deliveryInfo.address.trim()) {
+          return res.status(400).json({
+            success: false,
+            message: `Item ${processedItems.length + 1}: Rental delivery address is required`,
+            error: 'VALIDATION_ERROR'
+          });
+        }
+
         // Calculate installation charges for AC products
         let installationChargesAmount = 0;
         if (product.category === 'AC' && product.installationCharges && product.installationCharges.amount) {
@@ -446,6 +455,30 @@ exports.createOrder = async (req, res, next) => {
           return res.status(400).json({
             success: false,
             message: 'Service items require serviceId, price, and bookingDetails',
+            error: 'VALIDATION_ERROR'
+          });
+        }
+
+        // Validate service booking details - address, date, time are required
+        const bookingDetails = item.bookingDetails;
+        if (!bookingDetails.address || !bookingDetails.address.trim()) {
+          return res.status(400).json({
+            success: false,
+            message: `Item ${processedItems.length + 1}: Service booking address is required`,
+            error: 'VALIDATION_ERROR'
+          });
+        }
+        if (!bookingDetails.preferredDate && !bookingDetails.date) {
+          return res.status(400).json({
+            success: false,
+            message: `Item ${processedItems.length + 1}: Service booking date (preferredDate) is required`,
+            error: 'VALIDATION_ERROR'
+          });
+        }
+        if (!bookingDetails.preferredTime && !bookingDetails.time) {
+          return res.status(400).json({
+            success: false,
+            message: `Item ${processedItems.length + 1}: Service booking time (preferredTime) is required`,
             error: 'VALIDATION_ERROR'
           });
         }
@@ -685,7 +718,7 @@ exports.createOrder = async (req, res, next) => {
       // Get settings for advance payment amount
       const Settings = require('../models/Settings');
       const settings = await Settings.getSettings();
-      const expectedAdvanceAmount = settings.advancePaymentAmount || 500;
+      const configuredAdvanceAmount = settings.advancePaymentAmount || 500;
 
       // Validate priorityServiceScheduling - must be true for advance payment
       if (priorityServiceScheduling !== undefined && priorityServiceScheduling !== true) {
@@ -697,27 +730,37 @@ exports.createOrder = async (req, res, next) => {
       }
       orderPriorityServiceScheduling = true;
 
-      // Validate advanceAmount - should match advancePaymentAmount from settings
+      // Check if order contains only services (no rentals)
+      const hasOnlyServices = processedItems.every(item => item.type === 'service');
+      const hasRentals = processedItems.some(item => item.type === 'rental');
+
+      // Calculate advance amount based on order type
+      // For services-only orders: min(finalTotal, advancePaymentAmount)
+      // For rental orders (or mixed): advancePaymentAmount
+      if (hasOnlyServices && finalCorrectedFinalTotal < configuredAdvanceAmount) {
+        // Service price is less than configured advance amount
+        orderAdvanceAmount = roundMoney(finalCorrectedFinalTotal);
+      } else {
+        // For rentals or when service price >= advance amount, use configured advance amount
+        orderAdvanceAmount = roundMoney(configuredAdvanceAmount);
+      }
+
+      // Validate provided advanceAmount if given (should match calculated value)
       if (advanceAmount !== undefined) {
         const roundedAdvance = validateAndRoundMoney(advanceAmount, 'advanceAmount');
-        if (Math.abs(roundedAdvance - expectedAdvanceAmount) > 0.01) {
+        if (Math.abs(roundedAdvance - orderAdvanceAmount) > 0.01) {
           return res.status(400).json({
             success: false,
-            message: `advanceAmount must be exactly ₹${expectedAdvanceAmount} (current advance payment amount setting)`,
+            message: `advanceAmount mismatch. Expected ₹${orderAdvanceAmount}, got ₹${roundedAdvance}`,
             error: 'VALIDATION_ERROR'
           });
         }
-        orderAdvanceAmount = roundMoney(expectedAdvanceAmount);
-      } else {
-        orderAdvanceAmount = roundMoney(expectedAdvanceAmount);
       }
 
       // Calculate remaining amount
-      // If finalTotal < 999, set remainingAmount to 0 (advance covers full amount)
-      if (finalCorrectedFinalTotal < orderAdvanceAmount) {
+      // If finalTotal <= advanceAmount, set remainingAmount to 0 (advance covers full amount)
+      if (finalCorrectedFinalTotal <= orderAdvanceAmount) {
         orderRemainingAmount = 0;
-        // Note: In this case, the advance amount exceeds the final total
-        // Consider adjusting the advance amount or refunding excess
       } else {
         orderRemainingAmount = roundMoney(finalCorrectedFinalTotal - orderAdvanceAmount);
       }
@@ -938,14 +981,19 @@ exports.createOrder = async (req, res, next) => {
     // Format order for response to ensure all monetary values are rounded
     const formattedOrder = formatOrderResponse(order);
 
-    // Response structure per handoff doc
+    // Response structure per requirements doc - include advanceAmount and remainingAmount
     res.status(201).json({
       success: true,
       message: 'Order created successfully',
       data: {
         orderId: order.orderId,
-        order: formattedOrder, // Full order object with rounded monetary values
-        createdAt: order.createdAt
+        finalTotal: order.finalTotal,
+        advanceAmount: order.advanceAmount,
+        remainingAmount: order.remainingAmount,
+        paymentStatus: order.paymentStatus,
+        status: order.status,
+        createdAt: order.createdAt,
+        order: formattedOrder // Full order object with rounded monetary values
       }
     });
   } catch (error) {

@@ -164,7 +164,8 @@ exports.createRazorpayOrder = async (req, res, next) => {
           amount: paymentAmount, // Return payment amount (₹999 for advance, full amount for others)
           currency: 'INR',
           razorpayOrderId: razorpayOrder.id,
-          key: process.env.RAZORPAY_KEY_ID // Frontend needs this to initialize Razorpay
+          key: process.env.RAZORPAY_KEY_ID, // Frontend needs this to initialize Razorpay
+          paymentLink: process.env.RAZORPAY_PAYMENT_LINK || null // Optional: Payment link as fallback
         }
       });
     } catch (razorpayError) {
@@ -383,20 +384,14 @@ exports.verifyPayment = async (req, res, next) => {
       payment.paidAt = new Date();
       await payment.save();
 
-      // Update order payment status
+      // Update order payment status and order status
+      // Per requirements: After successful payment verification, order status should be "confirmed" and payment status to "paid"
       const order = await Order.findById(payment.orderId);
       if (order) {
-        // For advance payment orders, set status to 'advance_paid' or 'partial'
-        if (order.paymentOption === 'payAdvance') {
-          order.paymentStatus = 'advance_paid';
-          // Order status remains 'pending' until full payment is received
-          // Only update to 'confirmed' if remaining amount is 0
-          if (order.remainingAmount !== null && order.remainingAmount <= 0) {
-            order.status = 'confirmed';
-          }
-        } else {
-          order.paymentStatus = 'paid';
-          order.status = 'confirmed'; // Update order status to confirmed for full payment
+        // Update payment status to "paid" and order status to "confirmed" (if currently "pending")
+        order.paymentStatus = 'paid';
+        if (order.status === 'pending') {
+          order.status = 'confirmed';
         }
         order.paymentDetails = {
           paymentId: payment.paymentId,
@@ -421,14 +416,19 @@ exports.verifyPayment = async (req, res, next) => {
         `Payment of ₹${payment.amount} has been successfully processed.\n\nPayment ID: ${payment.paymentId}\nOrder ID: ${order?.orderId || 'N/A'}\nTransaction ID: ${transactionId}\nUser ID: ${userId}`
       );
 
+      // Return updated order data in response per requirements
+      const updatedOrder = await Order.findById(payment.orderId);
+
       res.json({
         success: true,
         message: 'Payment verified successfully',
         data: {
-          orderId: order?.orderId,
+          order: updatedOrder,
+          payment: payment,
+          orderId: updatedOrder?.orderId,
           paymentId: payment.paymentId,
-          paymentStatus: order?.paymentStatus || 'paid', // Return actual payment status (advance_paid for advance payments)
-          verifiedAt: payment.paidAt // Per handoff doc
+          paymentStatus: updatedOrder?.paymentStatus || 'paid',
+          verifiedAt: payment.paidAt
         }
       });
     } catch (razorpayError) {
@@ -623,16 +623,10 @@ exports.processPayment = async (req, res, next) => {
         });
       }
 
-      // Update order payment status
-      // For advance payment orders, set status to 'advance_paid'
-      if (order.paymentOption === 'payAdvance') {
-        order.paymentStatus = 'advance_paid';
-        // Order status remains 'pending' until full payment is received
-        if (order.remainingAmount !== null && order.remainingAmount <= 0) {
-          order.status = 'confirmed';
-        }
-      } else {
-        order.paymentStatus = 'paid';
+      // Update order payment status and order status
+      // Per requirements: After successful payment verification, order status should be "confirmed" and payment status to "paid"
+      order.paymentStatus = 'paid';
+      if (order.status === 'pending') {
         order.status = 'confirmed';
       }
       order.paymentDetails = {
@@ -783,16 +777,11 @@ exports.razorpayWebhook = async (req, res, next) => {
         await payment.save();
 
         // Update order
+        // Per requirements: After successful payment verification, order status should be "confirmed" and payment status to "paid"
         const order = await Order.findById(payment.orderId);
-        if (order && order.paymentStatus !== 'paid' && order.paymentStatus !== 'advance_paid') {
-          // For advance payment orders, set status to 'advance_paid'
-          if (order.paymentOption === 'payAdvance') {
-            order.paymentStatus = 'advance_paid';
-            if (order.remainingAmount !== null && order.remainingAmount <= 0) {
-              order.status = 'confirmed';
-            }
-          } else {
-            order.paymentStatus = 'paid';
+        if (order && order.paymentStatus !== 'paid') {
+          order.paymentStatus = 'paid';
+          if (order.status === 'pending') {
             order.status = 'confirmed';
           }
           order.paymentDetails = {
@@ -835,6 +824,31 @@ exports.razorpayWebhook = async (req, res, next) => {
     res.json({ success: true, message: 'Webhook processed' });
   } catch (error) {
     console.error('Webhook processing error:', error);
+    next(error);
+  }
+};
+
+// Get Payment Link (Returns the personalized Razorpay payment link)
+exports.getPaymentLink = async (req, res, next) => {
+  try {
+    const paymentLink = process.env.RAZORPAY_PAYMENT_LINK;
+    
+    if (!paymentLink) {
+      return res.status(404).json({
+        success: false,
+        message: 'Payment link not configured',
+        error: 'NOT_CONFIGURED'
+      });
+    }
+
+    res.json({
+      success: true,
+      data: {
+        paymentLink: paymentLink,
+        message: 'Use this link for manual payments or as a fallback option'
+      }
+    });
+  } catch (error) {
     next(error);
   }
 };

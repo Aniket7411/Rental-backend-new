@@ -36,6 +36,12 @@ ADMIN_EMAIL=admin@coolrentals.com
 TWILIO_ACCOUNT_SID=your-account-sid
 TWILIO_AUTH_TOKEN=your-auth-token
 TWILIO_PHONE_NUMBER=your-phone-number
+
+# Razorpay Configuration (REQUIRED - for payment processing)
+RAZORPAY_KEY_ID=your-razorpay-key-id
+RAZORPAY_KEY_SECRET=your-razorpay-key-secret
+RAZORPAY_WEBHOOK_SECRET=your-webhook-secret (optional, falls back to key_secret)
+RAZORPAY_PAYMENT_LINK=https://razorpay.me/@ashenterprises7526 (optional - personalized payment link)
 ```
 
 ## Important Notes
@@ -65,6 +71,23 @@ TWILIO_PHONE_NUMBER=your-phone-number
      4. Get a phone number from Twilio (or use your existing one)
      5. Add these credentials to your `.env` file
    - **Note**: In development mode, if Twilio is not configured, OTPs will be logged to console
+6. **RAZORPAY_***: **REQUIRED** - Needed for payment processing
+   - **RAZORPAY_KEY_ID**: Your Razorpay Key ID (found in Razorpay Dashboard → Settings → API Keys)
+   - **RAZORPAY_KEY_SECRET**: Your Razorpay Key Secret (found in Razorpay Dashboard → Settings → API Keys)
+   - **RAZORPAY_WEBHOOK_SECRET**: Optional - Webhook secret for payment verification (found in Razorpay Dashboard → Settings → Webhooks)
+   - **RAZORPAY_PAYMENT_LINK**: Optional - Your personalized Razorpay payment link (e.g., `https://razorpay.me/@ashenterprises7526`)
+   - **How to get Razorpay credentials:**
+     1. Sign up/login to Razorpay Dashboard at https://dashboard.razorpay.com
+     2. Go to Settings → API Keys
+     3. Generate new API keys (or use existing ones)
+     4. Copy the Key ID and Key Secret
+     5. Add these to your `.env` file
+   - **How to get Payment Link:**
+     1. Go to Razorpay Dashboard → Payment Links
+     2. Create a new payment link or use your personalized link
+     3. Copy the link (format: `https://razorpay.me/@yourusername`)
+     4. Add to `.env` as `RAZORPAY_PAYMENT_LINK`
+   - **Note**: Make sure you're using **Live Mode** keys for production, and **Test Mode** keys for development
 
 ## Creating Admin User
 

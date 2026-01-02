@@ -7,7 +7,8 @@ const {
   processPayment,
   getPaymentStatus,
   createRazorpayOrder,
-  razorpayWebhook
+  razorpayWebhook,
+  getPaymentLink
 } = require('../controllers/paymentController');
 const { auth } = require('../middleware/auth');
 
@@ -17,6 +18,7 @@ router.post('/webhook/razorpay', razorpayWebhook);
 
 // All other routes require authentication
 // IMPORTANT: Specific routes must come before parameterized routes (/:paymentId)
+router.get('/link', auth, getPaymentLink); // Get payment link (before /:paymentId)
 router.post('/create-order', auth, createRazorpayOrder); // New endpoint for creating Razorpay order
 router.post('/process', auth, processPayment);
 router.post('/initiate', auth, initiatePayment);
