@@ -112,6 +112,12 @@ const productSchema = new mongoose.Schema({
     type: String,
     // For Washing Machine: "Top Load" | "Front Load"
   },
+  weight: {
+    type: String,
+    enum: ['5kg', '6kg', '7kg', '8kg', '9kg'],
+    // Required only for Washing Machine category
+    required: false
+  },
   reviews: [{
     userId: {
       type: mongoose.Schema.Types.ObjectId,

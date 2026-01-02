@@ -207,6 +207,7 @@ exports.createProduct = async (req, res, next) => {
       energyRating,
       operationType,
       loadType,
+      weight,
       status = 'Available',
       installationCharges,
       monthlyPaymentEnabled,
@@ -329,6 +330,18 @@ exports.createProduct = async (req, res, next) => {
       }
     }
 
+    // Validate weight field if provided
+    if (weight !== undefined && weight !== null && weight !== '') {
+      const validWeights = ['5kg', '6kg', '7kg', '8kg', '9kg'];
+      if (!validWeights.includes(weight)) {
+        return res.status(400).json({
+          success: false,
+          message: `Weight must be one of: ${validWeights.join(', ')}`,
+          error: 'VALIDATION_ERROR'
+        });
+      }
+    }
+
     // Validate monthly payment fields
     if (monthlyPaymentEnabled === true) {
       if (!monthlyPrice || monthlyPrice <= 0) {
@@ -374,6 +387,7 @@ exports.createProduct = async (req, res, next) => {
       energyRating,
       operationType,
       loadType,
+      weight,
       status,
       monthlyPaymentEnabled: monthlyPaymentEnabled || false,
       monthlyPrice: monthlyPaymentEnabled === true ? monthlyPrice : null,
@@ -597,6 +611,18 @@ exports.updateProduct = async (req, res, next) => {
           // If monthly payment is disabled, set securityDeposit to 0
           product.securityDeposit = 0;
         }
+      }
+    }
+
+    // Validate weight field if provided
+    if (req.body.weight !== undefined) {
+      const validWeights = ['5kg', '6kg', '7kg', '8kg', '9kg'];
+      if (req.body.weight !== null && req.body.weight !== '' && !validWeights.includes(req.body.weight)) {
+        return res.status(400).json({
+          success: false,
+          message: `Weight must be one of: ${validWeights.join(', ')}`,
+          error: 'VALIDATION_ERROR'
+        });
       }
     }
 
