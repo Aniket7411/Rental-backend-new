@@ -304,6 +304,14 @@ exports.createProduct = async (req, res, next) => {
         });
       }
 
+      if (installationCharges.excludedItems && !Array.isArray(installationCharges.excludedItems)) {
+        return res.status(400).json({
+          success: false,
+          message: 'Excluded items must be an array',
+          error: 'VALIDATION_ERROR'
+        });
+      }
+
       if (installationCharges.extraMaterialRates) {
         const rates = installationCharges.extraMaterialRates;
         if (rates.copperPipe !== undefined && (typeof rates.copperPipe !== 'number' || rates.copperPipe < 0)) {
@@ -399,6 +407,7 @@ exports.createProduct = async (req, res, next) => {
       productData.installationCharges = {
         amount: installationCharges.amount || 0,
         includedItems: installationCharges.includedItems || [],
+        excludedItems: installationCharges.excludedItems || [],
         extraMaterialRates: {
           copperPipe: installationCharges.extraMaterialRates?.copperPipe || 0,
           drainPipe: installationCharges.extraMaterialRates?.drainPipe || 0,
@@ -511,6 +520,14 @@ exports.updateProduct = async (req, res, next) => {
           });
         }
 
+        if (installationCharges.excludedItems && !Array.isArray(installationCharges.excludedItems)) {
+          return res.status(400).json({
+            success: false,
+            message: 'Excluded items must be an array',
+            error: 'VALIDATION_ERROR'
+          });
+        }
+
         if (installationCharges.extraMaterialRates) {
           const rates = installationCharges.extraMaterialRates;
           if (rates.copperPipe !== undefined && (typeof rates.copperPipe !== 'number' || rates.copperPipe < 0)) {
@@ -540,6 +557,7 @@ exports.updateProduct = async (req, res, next) => {
         product.installationCharges = {
           amount: installationCharges.amount || 0,
           includedItems: installationCharges.includedItems || [],
+          excludedItems: installationCharges.excludedItems || [],
           extraMaterialRates: {
             copperPipe: installationCharges.extraMaterialRates?.copperPipe || 0,
             drainPipe: installationCharges.extraMaterialRates?.drainPipe || 0,

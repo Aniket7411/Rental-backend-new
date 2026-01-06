@@ -141,12 +141,12 @@ const orderSchema = new mongoose.Schema({
   },
   paymentOption: {
     type: String,
-    enum: ['payNow', 'payAdvance'],
+    enum: ['payNow', 'payAdvance', 'payLater'],
     required: true
   },
   paymentStatus: {
     type: String,
-    enum: ['paid', 'pending', 'advance_paid', 'partial', 'refunded'],
+    enum: ['pending', 'paid', 'failed', 'refunded'], // As per update.md requirements
     default: 'pending'
   },
   priorityServiceScheduling: {

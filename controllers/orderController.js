@@ -205,10 +205,34 @@ exports.createOrder = async (req, res, next) => {
       });
     }
 
-    if (!paymentOption || !['payNow', 'payAdvance'].includes(paymentOption)) {
+    if (!paymentOption || !['payNow', 'payAdvance', 'payLater'].includes(paymentOption)) {
       return res.status(400).json({
         success: false,
-        message: 'Payment option must be "payNow" or "payAdvance"',
+        message: 'Payment option must be "payNow", "payAdvance", or "payLater"',
+        error: 'VALIDATION_ERROR'
+      });
+    }
+
+    // Validate payment options based on order contents
+    const hasRentals = items.some(item => item.type === 'rental');
+    const hasServices = items.some(item => item.type === 'service');
+    const hasOnlyServices = hasServices && !hasRentals;
+    const hasOnlyRentals = hasRentals && !hasServices;
+
+    // payAdvance is only allowed for orders with rentals
+    if (paymentOption === 'payAdvance' && !hasRentals) {
+      return res.status(400).json({
+        success: false,
+        message: 'payAdvance option is only available for orders containing rentals',
+        error: 'VALIDATION_ERROR'
+      });
+    }
+
+    // payLater is only allowed for service-only orders
+    if (paymentOption === 'payLater' && !hasOnlyServices) {
+      return res.status(400).json({
+        success: false,
+        message: 'payLater option is only available for service-only orders',
         error: 'VALIDATION_ERROR'
       });
     }
@@ -436,6 +460,7 @@ exports.createOrder = async (req, res, next) => {
           installationCharges: roundedInstallationCharges > 0 ? {
             amount: roundedInstallationCharges,
             includedItems: product.installationCharges?.includedItems || [],
+            excludedItems: product.installationCharges?.excludedItems || [],
             extraMaterialRates: product.installationCharges?.extraMaterialRates || {
               copperPipe: 0,
               drainPipe: 0,
@@ -709,12 +734,43 @@ exports.createOrder = async (req, res, next) => {
       finalCorrectedFinalTotal = verificationTotal;
     }
 
-    // Handle advance payment validation and logic
+    // Handle payment option validation and logic
     let orderPriorityServiceScheduling = false;
     let orderAdvanceAmount = null;
     let orderRemainingAmount = null;
 
-    if (paymentOption === 'payAdvance') {
+    if (paymentOption === 'payLater') {
+      // For payLater orders (services only):
+      // - No advance payment required
+      // - Order can be confirmed immediately (service scheduled)
+      // - Payment will be collected after service completion
+      orderPriorityServiceScheduling = false;
+      orderAdvanceAmount = null;
+      orderRemainingAmount = null;
+      
+      // Validate that advance payment fields are not set
+      if (priorityServiceScheduling !== undefined && priorityServiceScheduling !== false) {
+        return res.status(400).json({
+          success: false,
+          message: 'priorityServiceScheduling must be false for payLater option',
+          error: 'VALIDATION_ERROR'
+        });
+      }
+      if (advanceAmount !== undefined && advanceAmount !== null) {
+        return res.status(400).json({
+          success: false,
+          message: 'advanceAmount must be null for payLater option',
+          error: 'VALIDATION_ERROR'
+        });
+      }
+      if (remainingAmount !== undefined && remainingAmount !== null) {
+        return res.status(400).json({
+          success: false,
+          message: 'remainingAmount must be null for payLater option',
+          error: 'VALIDATION_ERROR'
+        });
+      }
+    } else if (paymentOption === 'payAdvance') {
       // Get settings for advance payment amount
       const Settings = require('../models/Settings');
       const settings = await Settings.getSettings();
@@ -777,26 +833,29 @@ exports.createOrder = async (req, res, next) => {
           orderRemainingAmount = roundedRemaining >= 0 ? roundedRemaining : 0;
         }
       }
+    } else if (paymentOption === 'payLater') {
+      // For payLater orders, advance payment fields should be null (already handled above)
+      // No additional validation needed here
     } else {
-      // For non-advance payment options, validate that advance payment fields are not set
+      // For payNow payment option, validate that advance payment fields are not set
       if (priorityServiceScheduling !== undefined && priorityServiceScheduling !== false) {
         return res.status(400).json({
           success: false,
-          message: 'priorityServiceScheduling must be false for non-advance payment options',
+          message: 'priorityServiceScheduling must be false for payNow payment option',
           error: 'VALIDATION_ERROR'
         });
       }
       if (advanceAmount !== undefined && advanceAmount !== null) {
         return res.status(400).json({
           success: false,
-          message: 'advanceAmount must be null for non-advance payment options',
+          message: 'advanceAmount must be null for payNow payment option',
           error: 'VALIDATION_ERROR'
         });
       }
       if (remainingAmount !== undefined && remainingAmount !== null) {
         return res.status(400).json({
           success: false,
-          message: 'remainingAmount must be null for non-advance payment options',
+          message: 'remainingAmount must be null for payNow payment option',
           error: 'VALIDATION_ERROR'
         });
       }
@@ -807,16 +866,31 @@ exports.createOrder = async (req, res, next) => {
     if (paymentStatus) {
       finalPaymentStatus = paymentStatus;
     } else if (paymentOption === 'payNow') {
-      finalPaymentStatus = 'paid';
+      finalPaymentStatus = 'pending'; // Payment pending, will be updated after verification
     } else if (paymentOption === 'payAdvance') {
       finalPaymentStatus = 'pending'; // Advance payment not yet received
+    } else if (paymentOption === 'payLater') {
+      finalPaymentStatus = 'pending'; // Payment will be collected after service
     } else {
       finalPaymentStatus = 'pending';
     }
 
-    // Set order status based on payment status
-    // If payNow and payment is successful, status should be "confirmed", otherwise "pending"
-    const orderStatus = (paymentOption === 'payNow' && finalPaymentStatus === 'paid') ? 'confirmed' : 'pending';
+    // Set order status based on payment option
+    // - payNow: 'pending' (will be 'confirmed' after payment verification)
+    // - payLater: 'confirmed' or 'pending' (service scheduled, payment pending)
+    // - payAdvance: 'pending' (waiting for advance payment)
+    let orderStatus;
+    if (paymentOption === 'payNow') {
+      orderStatus = 'pending'; // Will be updated to 'confirmed' after payment verification
+    } else if (paymentOption === 'payLater') {
+      // Service scheduled, payment will be collected later
+      // Can be 'confirmed' (service scheduled) or 'pending' (awaiting scheduling)
+      orderStatus = 'confirmed'; // Service scheduled, payment pending
+    } else if (paymentOption === 'payAdvance') {
+      orderStatus = 'pending'; // Waiting for advance payment
+    } else {
+      orderStatus = 'pending';
+    }
 
     // Validate customerInfo if provided
     if (customerInfo) {

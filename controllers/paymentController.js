@@ -67,8 +67,12 @@ exports.createRazorpayOrder = async (req, res, next) => {
       });
     }
 
-    // Check if order is already paid
-    if (order.paymentStatus === 'paid' || order.paymentStatus === 'completed') {
+    // Check if order is already fully paid
+    // For advance payment orders: Check if remainingAmount is 0 (fully paid) or > 0 (advance paid, remaining pending)
+    const isFullyPaid = order.paymentStatus === 'paid' && 
+                        (!order.remainingAmount || order.remainingAmount <= 0.01);
+    
+    if (isFullyPaid) {
       return res.status(400).json({
         success: false,
         message: 'Order payment already completed',
@@ -120,6 +124,24 @@ exports.createRazorpayOrder = async (req, res, next) => {
       });
     }
 
+    // Razorpay minimum amount validation: ₹1.00 (100 paise)
+    const MINIMUM_AMOUNT = 1.00; // ₹1.00
+    const MINIMUM_AMOUNT_PAISE = 100; // 100 paise
+    
+    if (paymentAmount < MINIMUM_AMOUNT) {
+      return res.status(400).json({
+        success: false,
+        message: `Payment amount (₹${paymentAmount}) is less than minimum allowed amount (₹${MINIMUM_AMOUNT}). Order cannot be processed.`,
+        error: 'AMOUNT_TOO_LOW',
+        details: {
+          providedAmount: paymentAmount,
+          minimumAmount: MINIMUM_AMOUNT,
+          orderId: order.orderId,
+          paymentOption: order.paymentOption
+        }
+      });
+    }
+
     // Create payment record first (use paymentAmount which is rounded and validated)
     const payment = await Payment.create({
       orderId: order._id,
@@ -138,6 +160,11 @@ exports.createRazorpayOrder = async (req, res, next) => {
       // Ensure it's an integer (no decimals in paise)
       if (!Number.isInteger(amountInPaise)) {
         throw new Error('Invalid amount for payment gateway - must be an integer in paise');
+      }
+
+      // Double-check minimum amount in paise
+      if (amountInPaise < MINIMUM_AMOUNT_PAISE) {
+        throw new Error(`Amount (${amountInPaise} paise) is less than minimum required (${MINIMUM_AMOUNT_PAISE} paise)`);
       }
 
       const razorpayOrder = await razorpayInstance.orders.create({
@@ -174,6 +201,26 @@ exports.createRazorpayOrder = async (req, res, next) => {
       await payment.save();
 
       console.error('Razorpay order creation error:', razorpayError);
+      
+      // Check if it's a minimum amount error
+      const errorDescription = razorpayError.error?.description || '';
+      const isMinimumAmountError = errorDescription.toLowerCase().includes('minimum') || 
+                                   errorDescription.toLowerCase().includes('less than');
+      
+      if (isMinimumAmountError) {
+        return res.status(400).json({
+          success: false,
+          message: `Payment amount (₹${paymentAmount}) is less than Razorpay's minimum allowed amount (₹1.00). Please contact support or use a different payment method.`,
+          error: 'AMOUNT_TOO_LOW',
+          details: {
+            providedAmount: paymentAmount,
+            minimumAmount: 1.00,
+            orderId: order.orderId,
+            paymentOption: order.paymentOption,
+            razorpayError: razorpayError.error
+          }
+        });
+      }
       
       return res.status(500).json({
         success: false,
@@ -388,7 +435,9 @@ exports.verifyPayment = async (req, res, next) => {
       // Per requirements: After successful payment verification, order status should be "confirmed" and payment status to "paid"
       const order = await Order.findById(payment.orderId);
       if (order) {
-        // Update payment status to "paid" and order status to "confirmed" (if currently "pending")
+        // For advance payment orders: If remainingAmount > 0, payment is partial (advance paid, remaining pending)
+        // For other orders: Payment is complete
+        // Update payment status to "paid" (even for advance payments - remaining amount is tracked separately)
         order.paymentStatus = 'paid';
         if (order.status === 'pending') {
           order.status = 'confirmed';
@@ -510,7 +559,9 @@ exports.processPayment = async (req, res, next) => {
     
     // Handle advance payment orders
     if (order.paymentOption === 'payAdvance') {
-      if (order.paymentStatus === 'advance_paid' && order.remainingAmount > 0) {
+      // Check if this is a payment for remaining amount after advance payment
+      // For advance payment orders, if paymentStatus is 'paid' and remainingAmount > 0, this is remaining payment
+      if (order.paymentStatus === 'paid' && order.remainingAmount > 0 && order.remainingAmount > 0.01) {
         // This is a payment for the remaining amount after advance payment
         const roundedRemaining = roundMoney(order.remainingAmount);
         if (Math.abs(roundedAmount - roundedRemaining) > 0.01) {
@@ -625,6 +676,17 @@ exports.processPayment = async (req, res, next) => {
 
       // Update order payment status and order status
       // Per requirements: After successful payment verification, order status should be "confirmed" and payment status to "paid"
+      // For advance payment orders: If this is remaining payment, update remainingAmount to 0
+      if (order.paymentOption === 'payAdvance' && order.remainingAmount > 0) {
+        // This is payment for remaining amount after advance payment
+        // Check if payment amount matches remaining amount
+        const roundedRemaining = roundMoney(order.remainingAmount);
+        if (Math.abs(roundedAmount - roundedRemaining) <= 0.01) {
+          // Remaining amount paid - update remainingAmount to 0
+          order.remainingAmount = 0;
+        }
+      }
+      
       order.paymentStatus = 'paid';
       if (order.status === 'pending') {
         order.status = 'confirmed';

@@ -170,6 +170,10 @@ const productSchema = new mongoose.Schema({
       type: String,
       trim: true
     }],
+    excludedItems: [{
+      type: String,
+      trim: true
+    }],
     extraMaterialRates: {
       copperPipe: {
         type: Number,
@@ -275,6 +279,7 @@ productSchema.pre('save', function (next) {
       this.installationCharges = {
         amount: 0,
         includedItems: this.installationCharges.includedItems || [],
+        excludedItems: this.installationCharges.excludedItems || [],
         extraMaterialRates: {
           copperPipe: this.installationCharges.extraMaterialRates?.copperPipe || 0,
           drainPipe: this.installationCharges.extraMaterialRates?.drainPipe || 0,
