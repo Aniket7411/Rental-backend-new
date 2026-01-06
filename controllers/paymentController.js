@@ -505,14 +505,19 @@ exports.verifyPayment = async (req, res, next) => {
         await order.save();
       }
 
+      // Return updated order data in response for consistency
+      const updatedOrder = await Order.findById(payment.orderId);
+
       res.json({
         success: true,
         message: 'Payment verified successfully (signature verified, API verification skipped)',
         data: {
-          orderId: order?.orderId,
+          order: updatedOrder,  // ✅ Include full order object for consistency
+          payment: payment,
+          orderId: updatedOrder?.orderId,
           paymentId: payment.paymentId,
-          paymentStatus: 'paid', // Per handoff doc
-          verifiedAt: payment.paidAt // Per handoff doc
+          paymentStatus: updatedOrder?.paymentStatus || 'paid',
+          verifiedAt: payment.paidAt
         }
       });
     }
