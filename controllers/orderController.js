@@ -6,9 +6,27 @@ const ServiceBooking = require('../models/ServiceBooking');
 const Cart = require('../models/Cart');
 const Coupon = require('../models/Coupon');
 const CouponUsage = require('../models/CouponUsage');
+const Payment = require('../models/Payment');
+const Refund = require('../models/Refund');
+const Razorpay = require('razorpay');
 const { notifyAdmin } = require('../utils/notifications');
 const { roundMoney, validateAndRoundMoney } = require('../utils/money');
 const { formatOrderResponse, formatOrdersResponse } = require('../utils/orderFormatter');
+
+// Initialize Razorpay instance for refunds (lazy initialization)
+let razorpayInstance = null;
+const getRazorpayInstance = () => {
+  if (!razorpayInstance) {
+    if (!process.env.RAZORPAY_KEY_ID || !process.env.RAZORPAY_KEY_SECRET) {
+      throw new Error('Razorpay credentials are not configured. Please set RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET environment variables.');
+    }
+    razorpayInstance = new Razorpay({
+      key_id: process.env.RAZORPAY_KEY_ID,
+      key_secret: process.env.RAZORPAY_KEY_SECRET
+    });
+  }
+  return razorpayInstance;
+};
 
 // Get User Orders
 exports.getUserOrders = async (req, res, next) => {
@@ -894,12 +912,27 @@ exports.createOrder = async (req, res, next) => {
 
     // Validate customerInfo if provided
     if (customerInfo) {
-      if (!customerInfo.userId || !customerInfo.name || !customerInfo.email || !customerInfo.phone) {
+      if (!customerInfo.userId || !customerInfo.name || !customerInfo.phone) {
         return res.status(400).json({
           success: false,
-          message: 'customerInfo must include userId, name, email, and phone',
+          message: 'customerInfo must include userId, name, and phone (email is optional)',
           error: 'VALIDATION_ERROR'
         });
+      }
+      // Validate email format if provided (but allow null/undefined)
+      if (customerInfo.email !== null && customerInfo.email !== undefined && customerInfo.email !== '') {
+        const emailRegex = /^\S+@\S+\.\S+$/;
+        if (!emailRegex.test(customerInfo.email)) {
+          return res.status(400).json({
+            success: false,
+            message: 'Please provide a valid email address',
+            error: 'VALIDATION_ERROR'
+          });
+        }
+      }
+      // Set email to null if empty string or undefined
+      if (customerInfo.email === '' || customerInfo.email === undefined) {
+        customerInfo.email = null;
       }
     }
 
@@ -1259,6 +1292,90 @@ exports.cancelOrder = async (req, res, next) => {
     // Determine who is cancelling
     const cancelledBy = userRole === 'admin' ? 'admin' : 'user';
 
+    // Find payment record for refund processing
+    const payment = await Payment.findOne({ orderId: order._id });
+    
+    let refundData = null;
+    
+    // Process refund if payment was made
+    if (payment && payment.status === 'Completed' && (payment.razorpayPaymentId || payment.transactionId)) {
+      try {
+        // Determine refund amount
+        // For payNow: refund full amount
+        // For payAdvance: refund advance amount only
+        let refundAmount = 0;
+        
+        if (order.paymentOption === 'payNow') {
+          refundAmount = order.finalTotal;
+        } else if (order.paymentOption === 'payAdvance') {
+          refundAmount = order.advanceAmount || 0;
+        }
+        
+        // Convert to paise (Razorpay uses paise)
+        const refundAmountInPaise = Math.round(refundAmount * 100);
+        
+        if (refundAmountInPaise > 0) {
+          // Get Razorpay payment ID (use razorpayPaymentId if available, otherwise transactionId)
+          const razorpayPaymentId = payment.razorpayPaymentId || payment.transactionId;
+          
+          // Process refund through Razorpay
+          const refund = await getRazorpayInstance().payments.refund(
+            razorpayPaymentId,
+            {
+              amount: refundAmountInPaise,
+              notes: {
+                reason: cancellationReason || 'Order cancelled by user',
+                orderId: order.orderId,
+                cancelledAt: new Date().toISOString()
+              }
+            }
+          );
+          
+          // Create refund record in database
+          const refundRecord = await Refund.create({
+            refundId: refund.id,
+            razorpayRefundId: refund.id,
+            paymentId: payment._id,
+            orderId: order._id,
+            amount: refundAmount,
+            amountInPaise: refundAmountInPaise,
+            status: refund.status === 'processed' ? 'processed' : 'pending', // Map Razorpay status
+            reason: cancellationReason || 'Order cancelled by user',
+            processedAt: new Date(),
+            razorpayRefundData: refund
+          });
+          
+          // Update payment record with refund info
+          payment.refundId = refund.id;
+          payment.refundStatus = refund.status === 'processed' ? 'processed' : 'pending';
+          payment.refundAmount = refundAmount;
+          payment.refundedAt = new Date();
+          await payment.save();
+          
+          // Update order payment status to refunded
+          order.paymentStatus = 'refunded';
+          
+          refundData = refundRecord;
+        }
+      } catch (refundError) {
+        console.error('Refund processing error:', refundError);
+        
+        // Log refund error but don't fail order cancellation
+        // Order will be cancelled but refund will need manual processing
+        refundData = {
+          error: refundError.error?.description || refundError.message || 'Unknown error',
+          status: 'failed',
+          note: 'Refund processing failed - requires manual intervention'
+        };
+        
+        // Still update payment record to indicate refund attempt failed
+        if (payment) {
+          payment.refundStatus = 'failed';
+          await payment.save();
+        }
+      }
+    }
+
     // Update order with cancellation details
     order.status = 'cancelled';
     order.cancellationReason = cancellationReason.trim();
@@ -1291,16 +1408,18 @@ exports.cancelOrder = async (req, res, next) => {
 
     // Notify admin about order cancellation (non-blocking)
     const orderUser = order.userId;
+    const customerEmail = order.customerInfo?.email || orderUser?.email;
     const subject = `Order ${order.orderId} Cancelled - ${cancelledBy === 'admin' ? 'By Admin' : 'By User'}`;
     const messageText = `
       An order has been cancelled:
       
       Order ID: ${order.orderId}
-      Customer: ${orderUser?.name || 'N/A'} (${orderUser?.email || 'N/A'})
+      Customer: ${orderUser?.name || 'N/A'} (${customerEmail || 'No email provided'})
       Cancelled By: ${cancelledBy === 'admin' ? 'Admin' : 'User'}
       Cancellation Reason: ${cancellationReason}
       Cancelled At: ${order.cancelledAt.toLocaleString()}
       Order Total: ₹${order.total}
+      ${refundData && refundData.status ? `Refund Status: ${refundData.status}` : ''}
       
       Please check the admin panel for details.
     `;
@@ -1308,12 +1427,87 @@ exports.cancelOrder = async (req, res, next) => {
     // Use non-blocking notification - don't await to prevent API timeout
     notifyAdmin(subject, messageText).catch(error => {
       console.error('Failed to send cancellation notification email:', error);
+      // Don't fail order cancellation if email notification fails
     });
 
+    // Return response with refund information
     res.json({
       success: true,
-      message: 'Order cancelled successfully',
-      data: formattedOrder
+      message: refundData && refundData.status === 'processed' 
+        ? 'Order cancelled and refund processed successfully'
+        : refundData && refundData.status === 'failed'
+        ? 'Order cancelled but refund processing failed. Please contact support.'
+        : 'Order cancelled successfully',
+      data: {
+        order: formattedOrder,
+        refund: refundData
+      }
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// Get Refund Status for Order
+exports.getRefundStatus = async (req, res, next) => {
+  try {
+    const userId = req.user._id || req.user.id;
+    const userRole = req.user.role;
+    const orderId = req.params.orderId;
+
+    // Build query - admins can view any order, users can only view their own
+    let order = null;
+    if (mongoose.Types.ObjectId.isValid(orderId)) {
+      const orderQuery = userRole === 'admin'
+        ? { _id: orderId }
+        : { _id: orderId, userId };
+      order = await Order.findOne(orderQuery);
+    }
+
+    if (!order) {
+      const orderIdQuery = userRole === 'admin'
+        ? { orderId: orderId }
+        : { orderId: orderId, userId };
+      order = await Order.findOne(orderIdQuery);
+    }
+
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        message: 'Order not found',
+        error: 'NOT_FOUND'
+      });
+    }
+
+    // Find refund record
+    const refund = await Refund.findOne({ orderId: order._id })
+      .populate('paymentId')
+      .populate('orderId');
+
+    if (!refund) {
+      return res.json({
+        success: true,
+        message: 'No refund found for this order',
+        data: null
+      });
+    }
+
+    // Optionally fetch latest status from Razorpay
+    try {
+      const razorpayRefund = await getRazorpayInstance().refunds.fetch(refund.razorpayRefundId);
+      // Update refund status if changed
+      if (razorpayRefund.status !== refund.status) {
+        refund.status = razorpayRefund.status === 'processed' ? 'processed' : 'pending';
+        await refund.save();
+      }
+    } catch (error) {
+      console.error('Error fetching refund status from Razorpay:', error);
+      // Don't fail if Razorpay fetch fails
+    }
+
+    return res.json({
+      success: true,
+      data: refund
     });
   } catch (error) {
     next(error);

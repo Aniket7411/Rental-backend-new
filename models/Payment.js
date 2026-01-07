@@ -57,7 +57,32 @@ const paymentSchema = new mongoose.Schema({
     type: String,
     trim: true
   },
-  paidAt: Date
+  paidAt: Date,
+  razorpayPaymentId: {
+    type: String,
+    trim: true,
+    index: true
+  },
+  refundId: {
+    type: String,
+    required: false
+  },
+  refundStatus: {
+    type: String,
+    enum: ['processed', 'pending', 'failed', null],
+    default: null
+  },
+  refundAmount: {
+    type: Number,
+    required: false,
+    min: 0,
+    set: (v) => v !== null && v !== undefined ? roundMoney(v) : null,
+    get: (v) => v !== null && v !== undefined ? roundMoney(v) : null
+  },
+  refundedAt: {
+    type: Date,
+    required: false
+  }
 }, {
   timestamps: true
 });

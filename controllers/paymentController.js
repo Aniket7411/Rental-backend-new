@@ -673,6 +673,7 @@ exports.processPayment = async (req, res, next) => {
           paymentGateway: 'razorpay',
           gatewayOrderId: razorpayOrderId,
           transactionId: razorpayPaymentId,
+          razorpayPaymentId: razorpayPaymentId, // Store for refund processing
           signature: razorpaySignature,
           status: 'Completed',
           paidAt: new Date()
@@ -840,6 +841,7 @@ exports.razorpayWebhook = async (req, res, next) => {
       if (payment.status !== 'Completed') {
         payment.status = 'Completed';
         payment.transactionId = razorpayPaymentId;
+        payment.razorpayPaymentId = razorpayPaymentId; // Store for refund processing
         payment.paidAt = new Date();
         await payment.save();
 
@@ -981,6 +983,255 @@ exports.calculatePayment = async (req, res, next) => {
     });
   } catch (error) {
     next(error);
+  }
+};
+
+// Manual Refund (For Admin)
+exports.createRefund = async (req, res, next) => {
+  try {
+    const { paymentId, amount, notes } = req.body;
+
+    // Validate input
+    if (!paymentId || !amount) {
+      return res.status(400).json({
+        success: false,
+        message: 'Payment ID and amount are required',
+        error: 'VALIDATION_ERROR'
+      });
+    }
+
+    // Validate and round amount
+    const roundedAmount = validateAndRoundMoney(amount, 'refund amount');
+    
+    if (roundedAmount <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Refund amount must be greater than 0',
+        error: 'VALIDATION_ERROR'
+      });
+    }
+
+    // Find payment - support both MongoDB _id and paymentId string
+    let payment;
+    if (mongoose.Types.ObjectId.isValid(paymentId)) {
+      payment = await Payment.findById(paymentId);
+    } else {
+      payment = await Payment.findOne({ paymentId: paymentId });
+    }
+
+    if (!payment) {
+      return res.status(404).json({
+        success: false,
+        message: 'Payment not found',
+        error: 'NOT_FOUND'
+      });
+    }
+
+    if (payment.status !== 'Completed') {
+      return res.status(400).json({
+        success: false,
+        message: 'Payment is not in completed status. Only completed payments can be refunded.',
+        error: 'VALIDATION_ERROR',
+        details: {
+          paymentStatus: payment.status,
+          paymentId: payment.paymentId
+        }
+      });
+    }
+
+    if (payment.refundStatus === 'processed') {
+      return res.status(400).json({
+        success: false,
+        message: 'Refund already processed for this payment',
+        error: 'VALIDATION_ERROR',
+        details: {
+          refundId: payment.refundId,
+          refundAmount: payment.refundAmount,
+          refundedAt: payment.refundedAt
+        }
+      });
+    }
+
+    // Validate refund amount doesn't exceed payment amount
+    const paymentAmount = roundMoney(payment.amount);
+    if (roundedAmount > paymentAmount) {
+      return res.status(400).json({
+        success: false,
+        message: `Refund amount (₹${roundedAmount}) cannot exceed payment amount (₹${paymentAmount})`,
+        error: 'VALIDATION_ERROR',
+        details: {
+          refundAmount: roundedAmount,
+          paymentAmount: paymentAmount,
+          difference: roundedAmount - paymentAmount
+        }
+      });
+    }
+
+    // Check if partial refund is already processed
+    if (payment.refundAmount && payment.refundAmount > 0) {
+      const remainingRefundable = roundMoney(paymentAmount - payment.refundAmount);
+      if (roundedAmount > remainingRefundable) {
+        return res.status(400).json({
+          success: false,
+          message: `Refund amount (₹${roundedAmount}) exceeds remaining refundable amount (₹${remainingRefundable})`,
+          error: 'VALIDATION_ERROR',
+          details: {
+            refundAmount: roundedAmount,
+            alreadyRefunded: payment.refundAmount,
+            remainingRefundable: remainingRefundable
+          }
+        });
+      }
+    }
+
+    // Convert amount to paise
+    const refundAmountInPaise = Math.round(roundedAmount * 100);
+
+    // Razorpay minimum refund amount: ₹1.00 (100 paise)
+    const MINIMUM_REFUND_AMOUNT_PAISE = 100;
+    if (refundAmountInPaise < MINIMUM_REFUND_AMOUNT_PAISE) {
+      return res.status(400).json({
+        success: false,
+        message: `Refund amount (₹${roundedAmount}) is less than minimum allowed amount (₹1.00)`,
+        error: 'VALIDATION_ERROR'
+      });
+    }
+
+    // Get Razorpay payment ID
+    const razorpayPaymentId = payment.razorpayPaymentId || payment.transactionId;
+    if (!razorpayPaymentId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Razorpay payment ID not found. Cannot process refund without Razorpay payment ID.',
+        error: 'VALIDATION_ERROR'
+      });
+    }
+
+    // Process refund through Razorpay
+    let refund;
+    try {
+      refund = await razorpayInstance.payments.refund(
+        razorpayPaymentId,
+        {
+          amount: refundAmountInPaise,
+          notes: notes || {}
+        }
+      );
+    } catch (razorpayError) {
+      console.error('Razorpay refund error:', razorpayError);
+      return res.status(500).json({
+        success: false,
+        message: razorpayError.error?.description || 'Failed to process refund with Razorpay',
+        error: 'RAZORPAY_REFUND_ERROR',
+        details: razorpayError.error
+      });
+    }
+
+    // Create refund record
+    const Refund = require('../models/Refund');
+    let refundRecord;
+    try {
+      refundRecord = await Refund.create({
+        refundId: refund.id,
+        razorpayRefundId: refund.id,
+        paymentId: payment._id,
+        orderId: payment.orderId,
+        amount: roundedAmount, // Use rounded amount
+        amountInPaise: refundAmountInPaise,
+        status: refund.status === 'processed' ? 'processed' : 'pending',
+        reason: notes?.reason || 'Manual refund',
+        processedAt: new Date(),
+        razorpayRefundData: refund
+      });
+    } catch (dbError) {
+      console.error('Error creating refund record:', dbError);
+      // Refund was processed in Razorpay but failed to save in DB
+      // This is a critical error - log it and notify admin
+      await notifyAdmin(
+        `Refund Processed but Database Save Failed - Payment ${payment.paymentId}`,
+        `Refund of ₹${roundedAmount} was processed in Razorpay (ID: ${refund.id}) but failed to save in database.\n\nPayment ID: ${payment.paymentId}\nRazorpay Refund ID: ${refund.id}\nError: ${dbError.message}`
+      );
+      
+      return res.status(500).json({
+        success: false,
+        message: 'Refund processed in Razorpay but failed to save refund record. Please contact support.',
+        error: 'DATABASE_ERROR',
+        details: {
+          razorpayRefundId: refund.id,
+          error: dbError.message
+        }
+      });
+    }
+
+    // Update payment record
+    // For partial refunds, accumulate the refund amount
+    const currentRefundAmount = payment.refundAmount || 0;
+    const totalRefunded = roundMoney(currentRefundAmount + roundedAmount);
+    
+    payment.refundId = refund.id;
+    payment.refundStatus = refund.status === 'processed' ? 'processed' : 'pending';
+    payment.refundAmount = totalRefunded; // Accumulate refund amount
+    payment.refundedAt = new Date();
+    
+    // If full refund, update payment status
+    if (totalRefunded >= paymentAmount) {
+      payment.status = 'Refunded';
+    }
+    
+    await payment.save();
+
+    // Update order payment status
+    const order = await Order.findById(payment.orderId);
+    if (order) {
+      // If full refund, mark order as refunded
+      if (totalRefunded >= paymentAmount) {
+        order.paymentStatus = 'refunded';
+      }
+      // For partial refunds, keep paymentStatus as 'paid' since order is still valid
+      // The refund information is tracked in the Payment model
+      await order.save();
+
+      // Update product status if full refund
+      if (totalRefunded >= paymentAmount) {
+        const Product = require('../models/Product');
+        for (const item of order.items) {
+          if (item.type === 'rental' && item.productId) {
+            await Product.findByIdAndUpdate(item.productId, { status: 'Available' });
+          }
+        }
+      }
+    }
+
+    // Notify admin about refund
+    await notifyAdmin(
+      `Refund Processed - Payment ${payment.paymentId}`,
+      `Refund of ₹${roundedAmount} has been processed.\n\nPayment ID: ${payment.paymentId}\nOrder ID: ${order?.orderId || 'N/A'}\nRazorpay Refund ID: ${refund.id}\nTotal Refunded: ₹${totalRefunded} / ₹${paymentAmount}\nReason: ${notes?.reason || 'Manual refund'}`
+    );
+
+    return res.json({
+      success: true,
+      message: refund.status === 'processed' ? 'Refund processed successfully' : 'Refund initiated successfully',
+      data: {
+        refund: refundRecord,
+        payment: {
+          paymentId: payment.paymentId,
+          refundAmount: totalRefunded,
+          refundStatus: payment.refundStatus,
+          paymentAmount: paymentAmount
+        },
+        order: order ? {
+          orderId: order.orderId,
+          paymentStatus: order.paymentStatus
+        } : null
+      }
+    });
+  } catch (error) {
+    console.error('Manual refund error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to process refund',
+      error: error.error?.description || error.message || 'Unknown error'
+    });
   }
 };
 
