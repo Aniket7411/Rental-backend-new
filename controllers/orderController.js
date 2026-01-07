@@ -246,14 +246,8 @@ exports.createOrder = async (req, res, next) => {
       });
     }
 
-    // payLater is only allowed for service-only orders
-    if (paymentOption === 'payLater' && !hasOnlyServices) {
-      return res.status(400).json({
-        success: false,
-        message: 'payLater option is only available for service-only orders',
-        error: 'VALIDATION_ERROR'
-      });
-    }
+    // payLater is now allowed for both rentals and services
+    // No restriction needed - payLater can be used for any order type
 
     // Process items and calculate total
     let calculatedTotal = 0;
@@ -758,10 +752,11 @@ exports.createOrder = async (req, res, next) => {
     let orderRemainingAmount = null;
 
     if (paymentOption === 'payLater') {
-      // For payLater orders (services only):
+      // For payLater orders (rentals and services):
       // - No advance payment required
-      // - Order can be confirmed immediately (service scheduled)
-      // - Payment will be collected after service completion
+      // - Payment will be collected after installation/service completion
+      // - For rentals: Payment after installation
+      // - For services: Payment after service completion
       orderPriorityServiceScheduling = false;
       orderAdvanceAmount = null;
       orderRemainingAmount = null;
@@ -895,15 +890,17 @@ exports.createOrder = async (req, res, next) => {
 
     // Set order status based on payment option
     // - payNow: 'pending' (will be 'confirmed' after payment verification)
-    // - payLater: 'confirmed' or 'pending' (service scheduled, payment pending)
+    // - payLater: 'pending' (payment will be collected after installation/service completion)
+    //   - For rentals: Payment after installation
+    //   - For services: Payment after service completion
     // - payAdvance: 'pending' (waiting for advance payment)
     let orderStatus;
     if (paymentOption === 'payNow') {
       orderStatus = 'pending'; // Will be updated to 'confirmed' after payment verification
     } else if (paymentOption === 'payLater') {
-      // Service scheduled, payment will be collected later
-      // Can be 'confirmed' (service scheduled) or 'pending' (awaiting scheduling)
-      orderStatus = 'confirmed'; // Service scheduled, payment pending
+      // Payment will be collected after installation/service completion
+      // Order starts as 'pending' and can progress through delivery/installation stages
+      orderStatus = 'pending'; // Will progress through: confirmed → shipped → delivered → installed → completed (after payment)
     } else if (paymentOption === 'payAdvance') {
       orderStatus = 'pending'; // Waiting for advance payment
     } else {
@@ -1156,7 +1153,7 @@ exports.updateOrderStatus = async (req, res, next) => {
       });
     }
 
-    const validStatuses = ['pending', 'confirmed', 'processing', 'shipped', 'delivered', 'completed', 'cancelled'];
+    const validStatuses = ['pending', 'confirmed', 'processing', 'shipped', 'delivered', 'installed', 'completed', 'cancelled'];
     if (!validStatuses.includes(status)) {
       return res.status(400).json({
         success: false,
@@ -1195,6 +1192,7 @@ exports.updateOrderStatus = async (req, res, next) => {
 
     // Update product status when order is confirmed
     // Only update if status changed to 'confirmed' and payment is paid
+    // For payLater orders, product status will be updated when payment is collected
     if (status === 'confirmed' && oldOrder.paymentStatus === 'paid') {
       for (const item of order.items) {
         if (item.type === 'rental' && item.productId) {
@@ -1202,6 +1200,11 @@ exports.updateOrderStatus = async (req, res, next) => {
         }
       }
     }
+
+    // For payLater orders, allow status progression without payment
+    // Product status will be updated when payment is collected (in updatePaymentStatus)
+    // This allows orders to progress through: pending → confirmed → shipped → delivered → installed
+    // Payment collection happens after installation, then status becomes 'completed'
 
     // If order is cancelled or status changes away from confirmed, make products available again
     if (status === 'cancelled' && oldOrder.status !== 'cancelled') {
@@ -1222,6 +1225,162 @@ exports.updateOrderStatus = async (req, res, next) => {
       message: 'Order status updated successfully',
       data: formattedOrder
     });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// Update Payment Status (Admin) - For Pay Later orders
+exports.updatePaymentStatus = async (req, res, next) => {
+  try {
+    const orderId = req.params.orderId;
+    const { paymentStatus, paymentMethod, paymentReference, notes } = req.body;
+
+    // Validate payment status
+    if (!paymentStatus || !['paid', 'pending', 'failed'].includes(paymentStatus)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Payment status must be "paid", "pending", or "failed"',
+        error: 'VALIDATION_ERROR'
+      });
+    }
+
+    // Find order - support both MongoDB _id and orderId string
+    let order = null;
+    if (mongoose.Types.ObjectId.isValid(orderId)) {
+      order = await Order.findById(orderId);
+    } else {
+      order = await Order.findOne({ orderId: orderId });
+    }
+
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        message: 'Order not found',
+        error: 'NOT_FOUND'
+      });
+    }
+
+    // Validate that this is a payLater order
+    if (order.paymentOption !== 'payLater') {
+      return res.status(400).json({
+        success: false,
+        message: 'Payment status can only be updated manually for payLater orders',
+        error: 'VALIDATION_ERROR',
+        details: {
+          currentPaymentOption: order.paymentOption,
+          expectedPaymentOption: 'payLater'
+        }
+      });
+    }
+
+    // If marking as paid, validate required fields
+    if (paymentStatus === 'paid') {
+      if (!paymentMethod) {
+        return res.status(400).json({
+          success: false,
+          message: 'Payment method is required when marking payment as paid',
+          error: 'VALIDATION_ERROR'
+        });
+      }
+
+      // Validate payment method
+      const validPaymentMethods = ['cash', 'online', 'upi', 'card', 'bank_transfer'];
+      if (!validPaymentMethods.includes(paymentMethod.toLowerCase())) {
+        return res.status(400).json({
+          success: false,
+          message: `Payment method must be one of: ${validPaymentMethods.join(', ')}`,
+          error: 'VALIDATION_ERROR'
+        });
+      }
+
+      // Update order payment status
+      order.paymentStatus = 'paid';
+      
+      // Store payment details
+      order.paymentDetails = {
+        paymentMethod: paymentMethod.toLowerCase(),
+        paymentReference: paymentReference || null,
+        paidAt: new Date(),
+        notes: notes || null,
+        collectedBy: 'admin' // Indicates manual collection
+      };
+
+      // If order status is 'installed', update to 'completed'
+      if (order.status === 'installed') {
+        order.status = 'completed';
+      }
+
+      // Create payment record for tracking
+      const payment = await Payment.create({
+        orderId: order._id,
+        userId: order.userId,
+        amount: order.finalTotal,
+        paymentMethod: paymentMethod.toLowerCase(),
+        paymentGateway: 'manual', // Manual collection
+        status: 'Completed',
+        transactionId: paymentReference || `MANUAL-${Date.now()}`,
+        paidAt: new Date()
+      });
+
+      // Update product status to Rented Out for rental items (if not already)
+      for (const item of order.items) {
+        if (item.type === 'rental' && item.productId) {
+          const product = await Product.findById(item.productId);
+          if (product && product.status !== 'Rented Out') {
+            await Product.findByIdAndUpdate(item.productId, { status: 'Rented Out' });
+          }
+        }
+      }
+
+      await order.save();
+
+      // Notify admin about payment collection
+      const customerEmail = order.customerInfo?.email;
+      const customerName = order.customerInfo?.name || 'Customer';
+      
+      await notifyAdmin(
+        `Payment Collected - Order ${order.orderId}`,
+        `Payment of ₹${order.finalTotal} has been collected for order ${order.orderId}.\n\n` +
+        `Customer: ${customerName} (${customerEmail || 'No email'})\n` +
+        `Payment Method: ${paymentMethod}\n` +
+        `Payment Reference: ${paymentReference || 'N/A'}\n` +
+        `Collected At: ${new Date().toLocaleString()}\n` +
+        `${notes ? `Notes: ${notes}` : ''}`
+      );
+
+      // Format order for response
+      const formattedOrder = formatOrderResponse(order);
+
+      return res.json({
+        success: true,
+        message: 'Payment status updated successfully',
+        data: {
+          order: formattedOrder,
+          payment: {
+            paymentId: payment.paymentId,
+            amount: payment.amount,
+            paymentMethod: payment.paymentMethod,
+            status: payment.status,
+            paidAt: payment.paidAt
+          }
+        }
+      });
+    } else {
+      // For other status updates (pending, failed)
+      order.paymentStatus = paymentStatus;
+      await order.save();
+
+      const formattedOrder = formatOrderResponse(order);
+
+      return res.json({
+        success: true,
+        message: 'Payment status updated successfully',
+        data: {
+          order: formattedOrder
+        }
+      });
+    }
   } catch (error) {
     next(error);
   }

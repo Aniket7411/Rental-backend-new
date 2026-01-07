@@ -5,6 +5,7 @@ const {
   getOrderById,
   createOrder,
   updateOrderStatus,
+  updatePaymentStatus,
   cancelOrder,
   getRefundStatus
 } = require('../controllers/orderController');

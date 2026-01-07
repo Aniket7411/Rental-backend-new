@@ -32,7 +32,8 @@ const {
 } = require('../controllers/productController');
 const {
   getAllOrders,
-  updateOrderStatus
+  updateOrderStatus,
+  updatePaymentStatus
 } = require('../controllers/orderController');
 const {
   getAllServiceRequests,
@@ -105,6 +106,7 @@ router.delete('/products/:id', adminAuth, deleteProduct);
 // Admin order routes
 router.get('/orders', adminAuth, getAllOrders);
 router.patch('/orders/:orderId/status', adminAuth, updateOrderStatus);
+router.patch('/orders/:orderId/payment-status', adminAuth, updatePaymentStatus);
 
 // Admin service request routes (from BACKEND_UPDATES.md)
 router.get('/service-requests', adminAuth, getAllServiceRequests);
