@@ -303,12 +303,20 @@ exports.sendOTP = async (req, res, next) => {
       });
     }
 
-    // Validate phone number format (10 digits)
-    const phoneDigits = phone.replace(/\D/g, '');
+    // Validate and normalize phone number format
+    // Accept formats: "+911234567890" or "1234567890" (10 digits)
+    let phoneDigits = phone.replace(/\D/g, '');
+    
+    // If phone starts with +91 or 91, extract last 10 digits
+    if (phoneDigits.startsWith('91') && phoneDigits.length === 12) {
+      phoneDigits = phoneDigits.slice(2); // Remove "91" prefix
+    }
+    
+    // Validate: must be exactly 10 digits
     if (phoneDigits.length !== 10) {
       return res.status(400).json({
         success: false,
-        message: 'Phone number must be 10 digits',
+        message: 'Phone number must be 10 digits (e.g., +911234567890 or 1234567890)',
         error: 'VALIDATION_ERROR'
       });
     }
@@ -404,7 +412,11 @@ exports.verifyOTP = async (req, res, next) => {
       });
     }
 
-    const phoneDigits = phone.replace(/\D/g, '');
+    // Normalize phone number (handle +91 format)
+    let phoneDigits = phone.replace(/\D/g, '');
+    if (phoneDigits.startsWith('91') && phoneDigits.length === 12) {
+      phoneDigits = phoneDigits.slice(2); // Remove "91" prefix
+    }
 
     // Find OTP record
     const otpRecord = await OTP.findOne({
@@ -503,26 +515,34 @@ exports.verifyOTP = async (req, res, next) => {
   }
 };
 
-// Send OTP for Signup
+// Send OTP for Signup (Guest Checkout)
 exports.sendSignupOTP = async (req, res, next) => {
   try {
     const { phone, name, email } = req.body;
 
-    // Validation
-    if (!phone || !name) {
+    // Validation - phone is required, name and email are optional
+    if (!phone) {
       return res.status(400).json({
         success: false,
-        message: 'Please provide phone number and name',
+        message: 'Please provide phone number',
         error: 'VALIDATION_ERROR'
       });
     }
 
-    // Validate phone number format
-    const phoneDigits = phone.replace(/\D/g, '');
+    // Validate and normalize phone number format
+    // Accept formats: "+911234567890" or "1234567890" (10 digits)
+    let phoneDigits = phone.replace(/\D/g, '');
+    
+    // If phone starts with +91 or 91, extract last 10 digits
+    if (phoneDigits.startsWith('91') && phoneDigits.length === 12) {
+      phoneDigits = phoneDigits.slice(2); // Remove "91" prefix
+    }
+    
+    // Validate: must be exactly 10 digits
     if (phoneDigits.length !== 10) {
       return res.status(400).json({
         success: false,
-        message: 'Phone number must be 10 digits',
+        message: 'Phone number must be 10 digits (e.g., +911234567890 or 1234567890)',
         error: 'VALIDATION_ERROR'
       });
     }
@@ -536,14 +556,68 @@ exports.sendSignupOTP = async (req, res, next) => {
       });
     }
 
-    // Check if user already exists
+    // Check if user already exists - if exists, send login OTP instead
     const existingUser = await User.findOne({ phone: phoneDigits });
     if (existingUser) {
-      return res.status(400).json({
-        success: false,
-        message: 'User already exists with this phone number. Please login instead.',
-        error: 'USER_EXISTS'
+      // User exists - send login OTP instead (for guest checkout, allow login)
+      // Rate limiting for login OTP
+      const fifteenMinutesAgo = new Date(Date.now() - 15 * 60 * 1000);
+      const recentLoginOTPs = await OTP.countDocuments({
+        phone: phoneDigits,
+        purpose: 'login',
+        createdAt: { $gte: fifteenMinutesAgo }
       });
+
+      if (recentLoginOTPs >= 3) {
+        return res.status(429).json({
+          success: false,
+          message: 'Too many OTP requests. Please try again after some time.',
+          error: 'RATE_LIMIT_EXCEEDED'
+        });
+      }
+
+      // Generate OTP and session ID for login
+      const otp = generateOTP();
+      const sessionId = generateSessionId();
+      const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+
+      // Store OTP for login
+      await OTP.create({
+        phone: phoneDigits,
+        otp,
+        sessionId,
+        purpose: 'login',
+        expiresAt
+      });
+
+      // Send OTP via Twilio
+      try {
+        await sendTwilioOTP(phoneDigits, otp);
+        
+        return res.json({
+          success: true,
+          message: 'OTP sent successfully (login OTP)',
+          sessionId
+        });
+      } catch (twilioError) {
+        console.error('Twilio error:', twilioError);
+        
+        if (process.env.NODE_ENV === 'development') {
+          console.log(`🔐 Development OTP for ${phoneDigits}: ${otp}`);
+          return res.json({
+            success: true,
+            message: 'OTP sent successfully (development mode)',
+            sessionId,
+            ...(process.env.NODE_ENV === 'development' && { otp })
+          });
+        }
+        
+        return res.status(500).json({
+          success: false,
+          message: 'Failed to send OTP. Please try again later.',
+          error: 'OTP_SEND_FAILED'
+        });
+      }
     }
 
     // Check if email is already taken (if provided)
@@ -558,12 +632,12 @@ exports.sendSignupOTP = async (req, res, next) => {
       }
     }
 
-    // Rate limiting
-    const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+    // Rate limiting: 3 requests per 15 minutes (per requirements)
+    const fifteenMinutesAgo = new Date(Date.now() - 15 * 60 * 1000);
     const recentOTPs = await OTP.countDocuments({
       phone: phoneDigits,
       purpose: 'signup',
-      createdAt: { $gte: oneHourAgo }
+      createdAt: { $gte: fifteenMinutesAgo }
     });
 
     if (recentOTPs >= 3) {
@@ -579,14 +653,14 @@ exports.sendSignupOTP = async (req, res, next) => {
     const sessionId = generateSessionId();
     const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
 
-    // Store OTP with user data
+    // Store OTP with user data (name and email are optional)
     await OTP.create({
       phone: phoneDigits,
       otp,
       sessionId,
       purpose: 'signup',
       userData: {
-        name: name.trim(),
+        name: name ? name.trim() : undefined,
         email: email ? email.toLowerCase().trim() : undefined
       },
       expiresAt
@@ -598,7 +672,7 @@ exports.sendSignupOTP = async (req, res, next) => {
       
       res.json({
         success: true,
-        message: 'OTP sent successfully to your phone number',
+        message: 'OTP sent successfully',
         sessionId
       });
     } catch (twilioError) {
@@ -625,29 +699,43 @@ exports.sendSignupOTP = async (req, res, next) => {
   }
 };
 
-// Verify OTP for Signup
+// Verify OTP for Signup (Guest Checkout)
 exports.verifySignupOTP = async (req, res, next) => {
   try {
-    const { phone, otp, sessionId, name, email } = req.body;
+    const { phone, otp, sessionId, name, email, homeAddress } = req.body;
 
-    // Validation
-    if (!phone || !otp || !sessionId || !name) {
+    // Validation - phone, otp, and sessionId are required; name, email, homeAddress are optional
+    if (!phone || !otp || !sessionId) {
       return res.status(400).json({
         success: false,
-        message: 'Please provide phone number, OTP, session ID, and name',
+        message: 'Please provide phone number, OTP, and session ID',
         error: 'VALIDATION_ERROR'
       });
     }
 
-    const phoneDigits = phone.replace(/\D/g, '');
+    // Normalize phone number (handle +91 format)
+    let phoneDigits = phone.replace(/\D/g, '');
+    if (phoneDigits.startsWith('91') && phoneDigits.length === 12) {
+      phoneDigits = phoneDigits.slice(2); // Remove "91" prefix
+    }
 
-    // Find OTP record
-    const otpRecord = await OTP.findOne({
+    // Try to find OTP record for signup first
+    let otpRecord = await OTP.findOne({
       phone: phoneDigits,
       sessionId,
       purpose: 'signup',
       verified: false
     });
+
+    // If not found, try login OTP (for existing users)
+    if (!otpRecord) {
+      otpRecord = await OTP.findOne({
+        phone: phoneDigits,
+        sessionId,
+        purpose: 'login',
+        verified: false
+      });
+    }
 
     if (!otpRecord) {
       return res.status(400).json({
@@ -690,41 +778,76 @@ exports.verifySignupOTP = async (req, res, next) => {
       });
     }
 
-    // Verify user data matches
-    if (otpRecord.userData.name !== name.trim()) {
-      return res.status(400).json({
-        success: false,
-        message: 'Name does not match. Please use the same name used during signup.',
-        error: 'DATA_MISMATCH'
-      });
-    }
-
-    if (email && otpRecord.userData.email && otpRecord.userData.email !== email.toLowerCase().trim()) {
-      return res.status(400).json({
-        success: false,
-        message: 'Email does not match. Please use the same email used during signup.',
-        error: 'DATA_MISMATCH'
-      });
-    }
-
     // OTP is valid - mark as verified and delete
     await OTP.deleteOne({ _id: otpRecord._id });
 
-    // Check if user already exists (double check)
-    const existingUser = await User.findOne({ phone: phoneDigits });
-    if (existingUser) {
-      return res.status(400).json({
-        success: false,
-        message: 'User already exists with this phone number',
-        error: 'USER_EXISTS'
+    // Check if user already exists (by phone)
+    let user = await User.findOne({ phone: phoneDigits });
+
+    if (user) {
+      // User exists - log them in (for guest checkout)
+      // Update user data if provided
+      let updated = false;
+      if (name && name.trim() && !user.name) {
+        user.name = name.trim();
+        updated = true;
+      }
+      if (email && email.trim() && !user.email) {
+        const normalizedEmail = email.toLowerCase().trim();
+        // Check if email is not already taken by another user
+        const emailExists = await User.findOne({ email: normalizedEmail, _id: { $ne: user._id } });
+        if (!emailExists) {
+          user.email = normalizedEmail;
+          updated = true;
+        }
+      }
+      if (homeAddress && homeAddress.trim()) {
+        user.homeAddress = homeAddress.trim();
+        updated = true;
+      }
+      if (updated) {
+        await user.save();
+      }
+
+      // Generate token
+      const token = generateToken(user._id, user.email || user.phone, user.role);
+
+      // Return user data
+      const userResponse = {
+        id: user._id,
+        _id: user._id,
+        name: user.name,
+        email: user.email || '',
+        role: user.role,
+        phone: user.phone,
+        homeAddress: user.homeAddress || '',
+        address: {
+          homeAddress: user.homeAddress || '',
+          nearLandmark: user.nearLandmark || '',
+          pincode: user.pincode || '',
+          alternateNumber: user.alternateNumber || ''
+        }
+      };
+
+      return res.json({
+        success: true,
+        message: 'Login successful',
+        token,
+        user: userResponse
       });
     }
 
+    // User doesn't exist - create new user
+    // Use name from request or from OTP record, or default
+    const userName = name ? name.trim() : (otpRecord.userData?.name || 'Guest User');
+    const userEmail = email ? email.toLowerCase().trim() : (otpRecord.userData?.email || undefined);
+
     // Create new user
-    const user = await User.create({
-      name: otpRecord.userData.name,
-      email: otpRecord.userData.email || undefined,
+    user = await User.create({
+      name: userName,
+      email: userEmail,
       phone: phoneDigits,
+      homeAddress: homeAddress ? homeAddress.trim() : '',
       role: 'user'
       // Password is optional - not required for OTP-based auth
     });
@@ -741,10 +864,6 @@ exports.verifySignupOTP = async (req, res, next) => {
       role: user.role,
       phone: user.phone,
       homeAddress: user.homeAddress || '',
-      nearLandmark: user.nearLandmark || '',
-      pincode: user.pincode || '',
-      alternateNumber: user.alternateNumber || '',
-      interestedIn: user.interestedIn || [],
       address: {
         homeAddress: user.homeAddress || '',
         nearLandmark: user.nearLandmark || '',
