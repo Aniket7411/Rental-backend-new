@@ -4,20 +4,25 @@ const bcrypt = require('bcryptjs');
 const userSchema = new mongoose.Schema({
   name: {
     type: String,
-    required: [true, 'Name is required'],
-    trim: true
+    required: false, // Optional for guest checkout (can be set later)
+    trim: true,
+    default: ''
   },
   email: {
     type: String,
-    required: function() {
-      // Email is required if password is provided (for email/password auth)
-      return !!this.password;
-    },
+    required: false, // Email is optional (required only if password is provided)
     unique: true,
-    sparse: true, // Allow multiple null values
+    sparse: true, // Allow multiple null values - only unique if email exists
     lowercase: true,
     trim: true,
-    match: [/^\S+@\S+\.\S+$/, 'Please provide a valid email'],
+    validate: {
+      validator: function(v) {
+        // Only validate format if email is provided
+        if (!v || v === '') return true; // Allow null/empty
+        return /^\S+@\S+\.\S+$/.test(v); // Validate format if provided
+      },
+      message: 'Please provide a valid email address'
+    },
     index: true
   },
   password: {
@@ -78,16 +83,42 @@ const userSchema = new mongoose.Schema({
     index: true // Indexed for efficient queries
   },
   resetPasswordToken: String,
-  resetPasswordExpire: Date
+  resetPasswordExpire: Date,
+  // Guest checkout tracking (optional)
+  isGuestCheckout: {
+    type: Boolean,
+    default: false,
+    description: 'Indicates if user was created via guest checkout'
+  },
+  guestCheckoutDate: {
+    type: Date,
+    description: 'Date when user was created via guest checkout'
+  }
 }, {
   timestamps: true
 });
 
 // Hash password before saving (only if password is provided)
 userSchema.pre('save', async function (next) {
-  // If password is provided, email must also be provided
+  // If password is provided, email must also be provided (for email/password auth)
   if (this.password && !this.email) {
     return next(new Error('Email is required when password is provided'));
+  }
+  
+  // Set default name if not provided (for guest checkout)
+  if (!this.name || this.name.trim() === '') {
+    this.name = 'Guest User';
+  }
+  
+  // Normalize email if provided (lowercase, trim)
+  if (this.email) {
+    this.email = this.email.toLowerCase().trim();
+    // If email becomes empty after trimming, set to undefined
+    if (this.email === '') {
+      this.email = undefined;
+    }
+  } else {
+    this.email = undefined; // Ensure null emails are stored as undefined for sparse index
   }
   
   if (!this.isModified('password') || !this.password) {

@@ -909,27 +909,41 @@ exports.createOrder = async (req, res, next) => {
 
     // Validate customerInfo if provided
     if (customerInfo) {
-      if (!customerInfo.userId || !customerInfo.name || !customerInfo.phone) {
+      if (!customerInfo.userId || !customerInfo.phone) {
         return res.status(400).json({
           success: false,
-          message: 'customerInfo must include userId, name, and phone (email is optional)',
+          message: 'customerInfo must include userId and phone (name and email are optional)',
           error: 'VALIDATION_ERROR'
         });
       }
-      // Validate email format if provided (but allow null/undefined)
+      // Validate email format if provided (but allow null/undefined/empty)
+      // Email is optional for guest checkout users
       if (customerInfo.email !== null && customerInfo.email !== undefined && customerInfo.email !== '') {
         const emailRegex = /^\S+@\S+\.\S+$/;
         if (!emailRegex.test(customerInfo.email)) {
-          return res.status(400).json({
-            success: false,
-            message: 'Please provide a valid email address',
-            error: 'VALIDATION_ERROR'
-          });
+          // If email format is invalid, set to null (don't block order creation)
+          console.log(`[WARN] Invalid email format in customerInfo for order ${orderId}. Setting email to null.`);
+          customerInfo.email = null;
         }
       }
       // Set email to null if empty string or undefined
       if (customerInfo.email === '' || customerInfo.email === undefined) {
         customerInfo.email = null;
+      }
+      // Name is optional (user may not have name set yet for guest checkout)
+      if (!customerInfo.name || customerInfo.name.trim() === '') {
+        // Try to get name from user record
+        const User = require('../models/User');
+        try {
+          const user = await User.findById(customerInfo.userId);
+          if (user && user.name) {
+            customerInfo.name = user.name;
+          } else {
+            customerInfo.name = 'Guest User';
+          }
+        } catch (err) {
+          customerInfo.name = 'Guest User';
+        }
       }
     }
 

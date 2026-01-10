@@ -483,12 +483,12 @@ exports.verifyOTP = async (req, res, next) => {
     // Generate token (use phone as identifier if email is not available)
     const token = generateToken(user._id, user.email || user.phone, user.role);
 
-    // Return user data
+    // Return user data with all fields
     const userResponse = {
       id: user._id,
       _id: user._id,
-      name: user.name,
-      email: user.email || '',
+      name: user.name || 'Guest User',
+      email: user.email || null, // Can be null for OTP-based auth
       role: user.role,
       phone: user.phone,
       homeAddress: user.homeAddress || '',
@@ -620,17 +620,10 @@ exports.sendSignupOTP = async (req, res, next) => {
       }
     }
 
-    // Check if email is already taken (if provided)
-    if (email) {
-      const emailExists = await User.findOne({ email: email.toLowerCase() });
-      if (emailExists) {
-        return res.status(400).json({
-          success: false,
-          message: 'Email already registered. Please use a different email or login.',
-          error: 'EMAIL_EXISTS'
-        });
-      }
-    }
+    // ✅ FIX: Remove email registration check
+    // Email should be optional and should NOT block OTP sending
+    // Email conflicts will be handled during account creation in verifySignupOTP
+    // If email is provided, store it in OTP record for later use during account creation
 
     // Rate limiting: 3 requests per 15 minutes (per requirements)
     const fifteenMinutesAgo = new Date(Date.now() - 15 * 60 * 1000);
@@ -794,11 +787,18 @@ exports.verifySignupOTP = async (req, res, next) => {
       }
       if (email && email.trim() && !user.email) {
         const normalizedEmail = email.toLowerCase().trim();
-        // Check if email is not already taken by another user
-        const emailExists = await User.findOne({ email: normalizedEmail, _id: { $ne: user._id } });
-        if (!emailExists) {
-          user.email = normalizedEmail;
-          updated = true;
+        // Validate email format
+        const emailRegex = /^\S+@\S+\.\S+$/;
+        if (emailRegex.test(normalizedEmail)) {
+          // Check if email is not already taken by another user
+          const emailExists = await User.findOne({ email: normalizedEmail, _id: { $ne: user._id } });
+          if (!emailExists) {
+            user.email = normalizedEmail;
+            updated = true;
+          } else {
+            // Email exists in another account - skip updating email
+            console.log(`[INFO] Email ${normalizedEmail} already exists in another account. Skipping email update for user ${user._id}`);
+          }
         }
       }
       if (homeAddress && homeAddress.trim()) {
@@ -812,15 +812,18 @@ exports.verifySignupOTP = async (req, res, next) => {
       // Generate token
       const token = generateToken(user._id, user.email || user.phone, user.role);
 
-      // Return user data
+      // Return user data with all fields per requirements
       const userResponse = {
         id: user._id,
         _id: user._id,
-        name: user.name,
-        email: user.email || '',
+        name: user.name || 'Guest User',
+        email: user.email || null, // Can be null for guest checkout
         role: user.role,
         phone: user.phone,
         homeAddress: user.homeAddress || '',
+        nearLandmark: user.nearLandmark || '',
+        pincode: user.pincode || '',
+        alternateNumber: user.alternateNumber || '',
         address: {
           homeAddress: user.homeAddress || '',
           nearLandmark: user.nearLandmark || '',
@@ -840,36 +843,99 @@ exports.verifySignupOTP = async (req, res, next) => {
     // User doesn't exist - create new user
     // Use name from request or from OTP record, or default
     const userName = name ? name.trim() : (otpRecord.userData?.name || 'Guest User');
-    const userEmail = email ? email.toLowerCase().trim() : (otpRecord.userData?.email || undefined);
+    let userEmail = email ? email.toLowerCase().trim() : (otpRecord.userData?.email || undefined);
+    
+    // If email is provided, check if it exists in another account
+    // Handle email conflicts gracefully
+    if (userEmail) {
+      const emailExists = await User.findOne({ email: userEmail });
+      if (emailExists) {
+        // Email exists in another account - create account without email
+        // This allows guest checkout to proceed even if email is already registered
+        console.log(`[INFO] Email ${userEmail} already exists. Creating account without email for phone ${phoneDigits}`);
+        userEmail = undefined; // Don't use the email - create account without it
+      }
+    }
 
-    // Create new user
-    user = await User.create({
-      name: userName,
-      email: userEmail,
-      phone: phoneDigits,
-      homeAddress: homeAddress ? homeAddress.trim() : '',
-      role: 'user'
-      // Password is optional - not required for OTP-based auth
-    });
+    // Create new user - email is optional
+    try {
+      user = await User.create({
+        name: userName || 'Guest User', // Default name if not provided
+        email: userEmail || undefined, // Can be null/undefined
+        phone: phoneDigits,
+        homeAddress: homeAddress ? homeAddress.trim() : '',
+        role: 'user',
+        isGuestCheckout: true, // Track guest checkout users
+        guestCheckoutDate: new Date() // Record when user was created via guest checkout
+        // Password is optional - not required for OTP-based auth
+      });
+    } catch (createError) {
+      // Handle duplicate key errors gracefully
+      if (createError.code === 11000) {
+        const field = Object.keys(createError.keyPattern)[0];
+        if (field === 'phone') {
+          // Phone already exists - try to find and login instead
+          user = await User.findOne({ phone: phoneDigits });
+          if (user) {
+            // Generate token for existing user
+            const token = generateToken(user._id, user.email || user.phone, user.role);
+            const userResponse = {
+              id: user._id,
+              _id: user._id,
+              name: user.name || 'Guest User',
+              email: user.email || null, // Can be null for guest checkout
+              role: user.role,
+              phone: user.phone,
+              homeAddress: user.homeAddress || '',
+              nearLandmark: user.nearLandmark || '',
+              pincode: user.pincode || '',
+              alternateNumber: user.alternateNumber || '',
+              address: {
+                homeAddress: user.homeAddress || '',
+                nearLandmark: user.nearLandmark || '',
+                pincode: user.pincode || '',
+                alternateNumber: user.alternateNumber || ''
+              }
+            };
+            return res.json({
+              success: true,
+              message: 'Login successful',
+              token,
+              user: userResponse
+            });
+          }
+        }
+        return res.status(400).json({
+          success: false,
+          message: `${field === 'phone' ? 'Phone number' : 'Email'} already exists`,
+          error: 'DUPLICATE_ENTRY'
+        });
+      }
+      throw createError; // Re-throw other errors
+    }
 
     // Generate token
     const token = generateToken(user._id, user.email || user.phone, user.role);
 
-    // Return user data
+    // Return user data with all fields per requirements
     const userResponse = {
       id: user._id,
       _id: user._id,
-      name: user.name,
-      email: user.email || '',
+      name: user.name || 'Guest User',
+      email: user.email || null, // Can be null for guest checkout
       role: user.role,
       phone: user.phone,
       homeAddress: user.homeAddress || '',
+      nearLandmark: user.nearLandmark || '',
+      pincode: user.pincode || '',
+      alternateNumber: user.alternateNumber || '',
       address: {
         homeAddress: user.homeAddress || '',
         nearLandmark: user.nearLandmark || '',
         pincode: user.pincode || '',
         alternateNumber: user.alternateNumber || ''
-      }
+      },
+      createdAt: user.createdAt
     };
 
     res.status(201).json({
@@ -882,6 +948,35 @@ exports.verifySignupOTP = async (req, res, next) => {
     // Handle duplicate key error (phone or email)
     if (error.code === 11000) {
       const field = Object.keys(error.keyPattern)[0];
+      if (field === 'phone') {
+        // Phone already exists - try to find and login instead
+        const existingUser = await User.findOne({ phone: phoneDigits });
+        if (existingUser) {
+          // Generate token for existing user
+          const token = generateToken(existingUser._id, existingUser.email || existingUser.phone, existingUser.role);
+          const userResponse = {
+            id: existingUser._id,
+            _id: existingUser._id,
+            name: existingUser.name,
+            email: existingUser.email || '',
+            role: existingUser.role,
+            phone: existingUser.phone,
+            homeAddress: existingUser.homeAddress || '',
+            address: {
+              homeAddress: existingUser.homeAddress || '',
+              nearLandmark: existingUser.nearLandmark || '',
+              pincode: existingUser.pincode || '',
+              alternateNumber: existingUser.alternateNumber || ''
+            }
+          };
+          return res.json({
+            success: true,
+            message: 'Login successful',
+            token,
+            user: userResponse
+          });
+        }
+      }
       return res.status(400).json({
         success: false,
         message: `${field === 'phone' ? 'Phone number' : 'Email'} already exists`,

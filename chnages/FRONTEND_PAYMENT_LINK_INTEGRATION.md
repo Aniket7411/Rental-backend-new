@@ -148,7 +148,7 @@ const createOrder = async (orderId, amount) => {
       key: key,
       amount: data.data.amount * 100, // Convert to paise
       currency: 'INR',
-      name: 'Your Company Name',
+          name: 'ASH Enterprises',
       description: `Order ${data.data.orderId}`,
       order_id: razorpayOrderId,
       handler: function(response) {
