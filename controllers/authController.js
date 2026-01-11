@@ -695,7 +695,10 @@ exports.sendSignupOTP = async (req, res, next) => {
 // Verify OTP for Signup (Guest Checkout)
 exports.verifySignupOTP = async (req, res, next) => {
   try {
-    const { phone, otp, sessionId, name, email, homeAddress } = req.body;
+    const { phone, otp, sessionId, name, email, homeAddress, userData } = req.body;
+    
+    // Extract address from userData if provided (for guest checkout)
+    const providedAddress = userData?.homeAddress || homeAddress;
 
     // Validation - phone, otp, and sessionId are required; name, email, homeAddress are optional
     if (!phone || !otp || !sessionId) {
@@ -801,9 +804,25 @@ exports.verifySignupOTP = async (req, res, next) => {
           }
         }
       }
-      if (homeAddress && homeAddress.trim()) {
-        user.homeAddress = homeAddress.trim();
+      // Update address if provided (mandatory for guest checkout)
+      const addressToUpdate = providedAddress || homeAddress;
+      if (addressToUpdate && addressToUpdate.trim()) {
+        user.homeAddress = addressToUpdate.trim();
+        // Also update address fields if provided in userData
+        if (userData?.pincode) {
+          user.pincode = userData.pincode.trim();
+        }
+        if (userData?.nearLandmark) {
+          user.nearLandmark = userData.nearLandmark.trim();
+        }
+        if (userData?.alternateNumber) {
+          user.alternateNumber = userData.alternateNumber.trim();
+        }
         updated = true;
+      } else {
+        // For guest checkout, address should be mandatory
+        // But we'll allow existing users without address update (backward compatibility)
+        console.log(`[INFO] No address provided for existing user ${user._id} during guest checkout`);
       }
       if (updated) {
         await user.save();
@@ -845,6 +864,15 @@ exports.verifySignupOTP = async (req, res, next) => {
     const userName = name ? name.trim() : (otpRecord.userData?.name || 'Guest User');
     let userEmail = email ? email.toLowerCase().trim() : (otpRecord.userData?.email || undefined);
     
+    // Extract address - prioritize userData.homeAddress, then homeAddress parameter, then from OTP record
+    const finalAddress = providedAddress || (homeAddress ? homeAddress.trim() : '');
+    
+    // For guest checkout, address should be mandatory for new users
+    // But we'll allow creation without address for backward compatibility (log warning)
+    if (!finalAddress || !finalAddress.trim()) {
+      console.log(`[WARN] Guest checkout user creation without address for phone ${phoneDigits}`);
+    }
+    
     // If email is provided, check if it exists in another account
     // Handle email conflicts gracefully
     if (userEmail) {
@@ -857,13 +885,16 @@ exports.verifySignupOTP = async (req, res, next) => {
       }
     }
 
-    // Create new user - email is optional
+    // Create new user - email is optional, address should be provided
     try {
       user = await User.create({
         name: userName || 'Guest User', // Default name if not provided
         email: userEmail || undefined, // Can be null/undefined
         phone: phoneDigits,
-        homeAddress: homeAddress ? homeAddress.trim() : '',
+        homeAddress: finalAddress || '',
+        pincode: userData?.pincode ? userData.pincode.trim() : '',
+        nearLandmark: userData?.nearLandmark ? userData.nearLandmark.trim() : '',
+        alternateNumber: userData?.alternateNumber ? userData.alternateNumber.trim() : '',
         role: 'user',
         isGuestCheckout: true, // Track guest checkout users
         guestCheckoutDate: new Date() // Record when user was created via guest checkout

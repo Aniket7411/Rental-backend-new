@@ -432,7 +432,27 @@ exports.createOrder = async (req, res, next) => {
         if (!deliveryInfo.address || !deliveryInfo.address.trim()) {
           return res.status(400).json({
             success: false,
-            message: `Item ${processedItems.length + 1}: Rental delivery address is required`,
+            message: `Item ${processedItems.length + 1}: Delivery address is required for rental products`,
+            error: 'VALIDATION_ERROR',
+            errors: {
+              address: 'Address is mandatory for rental orders'
+            }
+          });
+        }
+        
+        // Validate contact information for rental delivery
+        if (!deliveryInfo.contactName || !deliveryInfo.contactName.trim()) {
+          return res.status(400).json({
+            success: false,
+            message: `Item ${processedItems.length + 1}: Contact name is required for rental delivery`,
+            error: 'VALIDATION_ERROR'
+          });
+        }
+        
+        if (!deliveryInfo.contactPhone || !deliveryInfo.contactPhone.trim()) {
+          return res.status(400).json({
+            success: false,
+            message: `Item ${processedItems.length + 1}: Contact phone is required for rental delivery`,
             error: 'VALIDATION_ERROR'
           });
         }
@@ -501,7 +521,27 @@ exports.createOrder = async (req, res, next) => {
         if (!bookingDetails.address || !bookingDetails.address.trim()) {
           return res.status(400).json({
             success: false,
-            message: `Item ${processedItems.length + 1}: Service booking address is required`,
+            message: `Item ${processedItems.length + 1}: Service address is required. Please provide complete address where service will be provided`,
+            error: 'VALIDATION_ERROR',
+            errors: {
+              address: 'Address is mandatory for service orders'
+            }
+          });
+        }
+        
+        // Validate contact information for service
+        if (!bookingDetails.contactName || !bookingDetails.contactName.trim()) {
+          return res.status(400).json({
+            success: false,
+            message: `Item ${processedItems.length + 1}: Contact name is required for service booking`,
+            error: 'VALIDATION_ERROR'
+          });
+        }
+        
+        if (!bookingDetails.contactPhone || !bookingDetails.contactPhone.trim()) {
+          return res.status(400).json({
+            success: false,
+            message: `Item ${processedItems.length + 1}: Contact phone is required for service booking`,
             error: 'VALIDATION_ERROR'
           });
         }
@@ -916,6 +956,24 @@ exports.createOrder = async (req, res, next) => {
           error: 'VALIDATION_ERROR'
         });
       }
+      
+      // Validate address for rentals - address is mandatory for rental orders
+      const hasRentalsForAddressCheck = items.some(item => item.type === 'rental');
+      if (hasRentalsForAddressCheck) {
+        // Check customerInfo.address.homeAddress or customerInfo.homeAddress
+        const customerAddress = customerInfo.address?.homeAddress || customerInfo.homeAddress || '';
+        if (!customerAddress || !customerAddress.trim()) {
+          return res.status(400).json({
+            success: false,
+            message: 'Delivery address is required for rental products. Please provide complete address in customerInfo.address.homeAddress',
+            error: 'VALIDATION_ERROR',
+            errors: {
+              address: 'Address is mandatory for rental orders'
+            }
+          });
+        }
+      }
+      
       // Validate email format if provided (but allow null/undefined/empty)
       // Email is optional for guest checkout users
       if (customerInfo.email !== null && customerInfo.email !== undefined && customerInfo.email !== '') {
@@ -944,6 +1002,14 @@ exports.createOrder = async (req, res, next) => {
         } catch (err) {
           customerInfo.name = 'Guest User';
         }
+      }
+      
+      // Ensure address object structure is consistent
+      if (!customerInfo.address) {
+        customerInfo.address = {};
+      }
+      if (customerInfo.homeAddress && !customerInfo.address.homeAddress) {
+        customerInfo.address.homeAddress = customerInfo.homeAddress;
       }
     }
 
