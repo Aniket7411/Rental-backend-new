@@ -28,7 +28,7 @@ async function seedAdmin() {
 
     // Check if admin already exists
     const existingAdmin = await User.findOne({ email: adminEmail });
-    
+
     if (existingAdmin) {
       console.log('⚠️  Admin user already exists with email:', adminEmail);
       console.log('   If you want to reset the password, delete the user first or update manually.');
@@ -36,17 +36,14 @@ async function seedAdmin() {
       process.exit(0);
     }
 
-    // Hash password
-    const hashedPassword = await bcrypt.hash(adminPassword, 10);
-    console.log('✅ Password hashed');
-
     // Create admin user
     // Note: Phone is required in User model, so we'll use a placeholder
     // In production, you should set a valid phone number
+    // Password will be automatically hashed by the User model's pre-save hook
     const admin = await User.create({
       name: adminName,
       email: adminEmail,
-      password: hashedPassword,
+      password: adminPassword, // Pass plain password - will be hashed by pre-save hook
       phone: '0000000000', // Placeholder phone number (required field)
       role: 'admin'
     });
@@ -65,11 +62,11 @@ async function seedAdmin() {
     process.exit(0);
   } catch (error) {
     console.error('❌ Error seeding admin:', error);
-    
+
     if (error.code === 11000) {
       console.error('   Duplicate key error - admin user may already exist');
     }
-    
+
     await mongoose.connection.close();
     process.exit(1);
   }

@@ -556,74 +556,13 @@ exports.sendSignupOTP = async (req, res, next) => {
       });
     }
 
-    // Check if user already exists - if exists, send login OTP instead
-    const existingUser = await User.findOne({ phone: phoneDigits });
-    if (existingUser) {
-      // User exists - send login OTP instead (for guest checkout, allow login)
-      // Rate limiting for login OTP
-      const fifteenMinutesAgo = new Date(Date.now() - 15 * 60 * 1000);
-      const recentLoginOTPs = await OTP.countDocuments({
-        phone: phoneDigits,
-        purpose: 'login',
-        createdAt: { $gte: fifteenMinutesAgo }
-      });
-
-      if (recentLoginOTPs >= 3) {
-        return res.status(429).json({
-          success: false,
-          message: 'Too many OTP requests. Please try again after some time.',
-          error: 'RATE_LIMIT_EXCEEDED'
-        });
-      }
-
-      // Generate OTP and session ID for login
-      const otp = generateOTP();
-      const sessionId = generateSessionId();
-      const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
-
-      // Store OTP for login
-      await OTP.create({
-        phone: phoneDigits,
-        otp,
-        sessionId,
-        purpose: 'login',
-        expiresAt
-      });
-
-      // Send OTP via Twilio
-      try {
-        await sendTwilioOTP(phoneDigits, otp);
-        
-        return res.json({
-          success: true,
-          message: 'OTP sent successfully (login OTP)',
-          sessionId
-        });
-      } catch (twilioError) {
-        console.error('Twilio error:', twilioError);
-        
-        if (process.env.NODE_ENV === 'development') {
-          console.log(`🔐 Development OTP for ${phoneDigits}: ${otp}`);
-          return res.json({
-            success: true,
-            message: 'OTP sent successfully (development mode)',
-            sessionId,
-            ...(process.env.NODE_ENV === 'development' && { otp })
-          });
-        }
-        
-        return res.status(500).json({
-          success: false,
-          message: 'Failed to send OTP. Please try again later.',
-          error: 'OTP_SEND_FAILED'
-        });
-      }
-    }
-
-    // ✅ FIX: Remove email registration check
-    // Email should be optional and should NOT block OTP sending
-    // Email conflicts will be handled during account creation in verifySignupOTP
-    // If email is provided, store it in OTP record for later use during account creation
+    // ✅ SEAMLESS CHECKOUT: Always send signup OTP (don't differentiate between new/existing users)
+    // Whether user is new or existing will be handled during OTP verification
+    // This allows seamless checkout for all users without blocking them
+    
+    // ✅ DO NOT check if user exists here - send OTP anyway
+    // ✅ DO NOT check if email exists here - send OTP anyway
+    // All checks will be handled gracefully during verification
 
     // Rate limiting: 3 requests per 15 minutes (per requirements)
     const fifteenMinutesAgo = new Date(Date.now() - 15 * 60 * 1000);
@@ -694,6 +633,9 @@ exports.sendSignupOTP = async (req, res, next) => {
 
 // Verify OTP for Signup (Guest Checkout)
 exports.verifySignupOTP = async (req, res, next) => {
+  // Extract phoneDigits early so it's available in catch blocks
+  let phoneDigits = null;
+  
   try {
     const { phone, otp, sessionId, name, email, homeAddress, userData } = req.body;
     
@@ -710,9 +652,19 @@ exports.verifySignupOTP = async (req, res, next) => {
     }
 
     // Normalize phone number (handle +91 format)
-    let phoneDigits = phone.replace(/\D/g, '');
+    // Extract phone digits (remove +91 or other country codes)
+    phoneDigits = phone.replace(/\D/g, ''); // Remove all non-digit characters first
     if (phoneDigits.startsWith('91') && phoneDigits.length === 12) {
-      phoneDigits = phoneDigits.slice(2); // Remove "91" prefix
+      phoneDigits = phoneDigits.slice(2); // Remove "91" prefix to get 10-digit number
+    }
+    
+    // Validate phone number length (should be 10 digits)
+    if (phoneDigits.length !== 10) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid phone number. Please provide a valid 10-digit phone number.',
+        error: 'VALIDATION_ERROR'
+      });
     }
 
     // Try to find OTP record for signup first
@@ -784,23 +736,32 @@ exports.verifySignupOTP = async (req, res, next) => {
       // User exists - log them in (for guest checkout)
       // Update user data if provided
       let updated = false;
-      if (name && name.trim() && !user.name) {
+      // Update name if provided (update even if user already has name - allows name changes)
+      if (name && name.trim()) {
         user.name = name.trim();
         updated = true;
       }
-      if (email && email.trim() && !user.email) {
+      // Handle email gracefully - never block checkout for email conflicts
+      if (email && email.trim()) {
         const normalizedEmail = email.toLowerCase().trim();
         // Validate email format
         const emailRegex = /^\S+@\S+\.\S+$/;
         if (emailRegex.test(normalizedEmail)) {
-          // Check if email is not already taken by another user
-          const emailExists = await User.findOne({ email: normalizedEmail, _id: { $ne: user._id } });
-          if (!emailExists) {
-            user.email = normalizedEmail;
-            updated = true;
+          // Check if email is already used by this user
+          if (user.email === normalizedEmail) {
+            // Same email - no change needed
           } else {
-            // Email exists in another account - skip updating email
-            console.log(`[INFO] Email ${normalizedEmail} already exists in another account. Skipping email update for user ${user._id}`);
+            // Different email provided - check if it's available
+            const emailExists = await User.findOne({ email: normalizedEmail, _id: { $ne: user._id } });
+            if (!emailExists) {
+              // Email is available - update user's email
+              user.email = normalizedEmail;
+              updated = true;
+            } else {
+              // Email exists in another account - keep existing email (don't update)
+              // This is NOT an error - checkout should proceed smoothly
+              console.log(`[INFO] Email ${normalizedEmail} already exists in another account. Keeping existing email for user ${user._id}`);
+            }
           }
         }
       }
@@ -886,10 +847,10 @@ exports.verifySignupOTP = async (req, res, next) => {
     }
 
     // Create new user - email is optional, address should be provided
+    // Note: Don't include email field if undefined (for sparse index compatibility)
     try {
-      user = await User.create({
+      const userDataToCreate = {
         name: userName || 'Guest User', // Default name if not provided
-        email: userEmail || undefined, // Can be null/undefined
         phone: phoneDigits,
         homeAddress: finalAddress || '',
         pincode: userData?.pincode ? userData.pincode.trim() : '',
@@ -899,7 +860,17 @@ exports.verifySignupOTP = async (req, res, next) => {
         isGuestCheckout: true, // Track guest checkout users
         guestCheckoutDate: new Date() // Record when user was created via guest checkout
         // Password is optional - not required for OTP-based auth
-      });
+      };
+      
+      // Only add email if it's provided (don't set to null/undefined - omit the field)
+      // This ensures the sparse index works correctly even if database index isn't sparse yet
+      if (userEmail) {
+        userDataToCreate.email = userEmail;
+      }
+      // If email is not provided, don't include it in the create object
+      // This prevents "email: null" from being stored, which causes duplicate errors
+      
+      user = await User.create(userDataToCreate);
     } catch (createError) {
       // Handle duplicate key errors gracefully
       if (createError.code === 11000) {
@@ -936,11 +907,94 @@ exports.verifySignupOTP = async (req, res, next) => {
             });
           }
         }
-        return res.status(400).json({
-          success: false,
-          message: `${field === 'phone' ? 'Phone number' : 'Email'} already exists`,
-          error: 'DUPLICATE_ENTRY'
-        });
+        // ✅ SEAMLESS CHECKOUT: Never return error for duplicates - handle gracefully
+        // If it's a phone duplicate (shouldn't happen due to check above), find and login
+        // If it's an email duplicate, retry without email
+        if (field === 'email' && userEmail) {
+          // Retry creating user without email
+          console.log(`[INFO] Email duplicate error. Retrying without email for phone ${phoneDigits}`);
+          try {
+            user = await User.create({
+              name: userName || 'Guest User',
+              email: undefined, // Create without email
+              phone: phoneDigits,
+              homeAddress: finalAddress || '',
+              pincode: userData?.pincode ? userData.pincode.trim() : '',
+              nearLandmark: userData?.nearLandmark ? userData.nearLandmark.trim() : '',
+              alternateNumber: userData?.alternateNumber ? userData.alternateNumber.trim() : '',
+              role: 'user',
+              isGuestCheckout: true,
+              guestCheckoutDate: new Date()
+            });
+          } catch (retryError) {
+            // If retry fails, try to find existing user
+            if (retryError.code === 11000 && retryError.keyPattern?.phone) {
+              user = await User.findOne({ phone: phoneDigits });
+              if (user) {
+                const token = generateToken(user._id, user.email || user.phone, user.role);
+                const userResponse = {
+                  id: user._id,
+                  _id: user._id,
+                  name: user.name || 'Guest User',
+                  email: user.email || null,
+                  role: user.role,
+                  phone: user.phone,
+                  homeAddress: user.homeAddress || '',
+                  nearLandmark: user.nearLandmark || '',
+                  pincode: user.pincode || '',
+                  alternateNumber: user.alternateNumber || '',
+                  address: {
+                    homeAddress: user.homeAddress || '',
+                    nearLandmark: user.nearLandmark || '',
+                    pincode: user.pincode || '',
+                    alternateNumber: user.alternateNumber || ''
+                  }
+                };
+                return res.json({
+                  success: true,
+                  message: 'Account created successfully',
+                  token,
+                  user: userResponse
+                });
+              }
+            }
+            throw retryError; // Re-throw if we can't handle it
+          }
+        } else {
+          // Phone duplicate or other error - should not happen, but handle gracefully
+          // Try to find existing user
+          if (field === 'phone') {
+            user = await User.findOne({ phone: phoneDigits });
+            if (user) {
+              const token = generateToken(user._id, user.email || user.phone, user.role);
+              const userResponse = {
+                id: user._id,
+                _id: user._id,
+                name: user.name || 'Guest User',
+                email: user.email || null,
+                role: user.role,
+                phone: user.phone,
+                homeAddress: user.homeAddress || '',
+                nearLandmark: user.nearLandmark || '',
+                pincode: user.pincode || '',
+                alternateNumber: user.alternateNumber || '',
+                address: {
+                  homeAddress: user.homeAddress || '',
+                  nearLandmark: user.nearLandmark || '',
+                  pincode: user.pincode || '',
+                  alternateNumber: user.alternateNumber || ''
+                }
+              };
+              return res.json({
+                success: true,
+                message: 'Account created successfully',
+                token,
+                user: userResponse
+              });
+            }
+          }
+          throw createError; // Re-throw if we can't handle it
+        }
       }
       throw createError; // Re-throw other errors
     }
@@ -979,20 +1033,147 @@ exports.verifySignupOTP = async (req, res, next) => {
     // Handle duplicate key error (phone or email)
     if (error.code === 11000) {
       const field = Object.keys(error.keyPattern)[0];
-      if (field === 'phone') {
-        // Phone already exists - try to find and login instead
+      
+      // Extract phoneDigits from request if not already defined
+      if (!phoneDigits && req.body?.phone) {
+        phoneDigits = req.body.phone.replace(/\D/g, ''); // Handles spaces: "+91 8318825828" → "918318825828"
+        if (phoneDigits.startsWith('91') && phoneDigits.length === 12) {
+          phoneDigits = phoneDigits.slice(2); // → "8318825828"
+        }
+      }
+      
+      // ✅ CRITICAL FIX: Handle email:null duplicate error (database index not sparse)
+      // This happens when multiple users try to create accounts without email
+      // The database index on email might not be sparse, causing duplicate key errors for null values
+      if (field === 'email' && error.keyValue?.email === null && phoneDigits) {
+        // Try to find existing user by phone (most likely scenario)
         const existingUser = await User.findOne({ phone: phoneDigits });
         if (existingUser) {
-          // Generate token for existing user
+          // Update user profile if data provided
+          let updated = false;
+          if (name && name.trim()) {
+            existingUser.name = name.trim();
+            updated = true;
+          }
+          if (homeAddress && homeAddress.trim()) {
+            existingUser.homeAddress = homeAddress.trim();
+            updated = true;
+          }
+          if (userData?.pincode) {
+            existingUser.pincode = userData.pincode.trim();
+            updated = true;
+          }
+          if (userData?.nearLandmark) {
+            existingUser.nearLandmark = userData.nearLandmark.trim();
+            updated = true;
+          }
+          if (updated) {
+            await existingUser.save();
+          }
+          
           const token = generateToken(existingUser._id, existingUser.email || existingUser.phone, existingUser.role);
           const userResponse = {
             id: existingUser._id,
             _id: existingUser._id,
-            name: existingUser.name,
-            email: existingUser.email || '',
+            name: existingUser.name || 'Guest User',
+            email: existingUser.email || null,
             role: existingUser.role,
             phone: existingUser.phone,
             homeAddress: existingUser.homeAddress || '',
+            nearLandmark: existingUser.nearLandmark || '',
+            pincode: existingUser.pincode || '',
+            alternateNumber: existingUser.alternateNumber || '',
+            address: {
+              homeAddress: existingUser.homeAddress || '',
+              nearLandmark: existingUser.nearLandmark || '',
+              pincode: existingUser.pincode || '',
+              alternateNumber: existingUser.alternateNumber || ''
+            }
+          };
+          return res.json({
+            success: true,
+            message: 'Login successful',
+            token,
+            user: userResponse
+          });
+        }
+        
+        // If user not found by phone, try to create without email (retry with different approach)
+        // This handles the case where the database index is not sparse
+        console.log(`[WARN] Email null duplicate error for phone ${phoneDigits}. Attempting to find or create user.`);
+        try {
+          // Try to find user by phone one more time
+          const userByPhone = await User.findOne({ phone: phoneDigits });
+          if (userByPhone) {
+            const token = generateToken(userByPhone._id, userByPhone.email || userByPhone.phone, userByPhone.role);
+            const userResponse = {
+              id: userByPhone._id,
+              _id: userByPhone._id,
+              name: userByPhone.name || 'Guest User',
+              email: userByPhone.email || null,
+              role: userByPhone.role,
+              phone: userByPhone.phone,
+              homeAddress: userByPhone.homeAddress || '',
+              nearLandmark: userByPhone.nearLandmark || '',
+              pincode: userByPhone.pincode || '',
+              alternateNumber: userByPhone.alternateNumber || '',
+              address: {
+                homeAddress: userByPhone.homeAddress || '',
+                nearLandmark: userByPhone.nearLandmark || '',
+                pincode: userByPhone.pincode || '',
+                alternateNumber: userByPhone.alternateNumber || ''
+              }
+            };
+            return res.json({
+              success: true,
+              message: 'Login successful',
+              token,
+              user: userResponse
+            });
+          }
+        } catch (findError) {
+          console.error('Error finding user by phone:', findError);
+        }
+      }
+      
+      if (field === 'phone' && phoneDigits) {
+        // Phone already exists - try to find and login instead
+        const existingUser = await User.findOne({ phone: phoneDigits });
+        if (existingUser) {
+          // Update user profile if data provided
+          let updated = false;
+          if (name && name.trim()) {
+            existingUser.name = name.trim();
+            updated = true;
+          }
+          if (homeAddress && homeAddress.trim()) {
+            existingUser.homeAddress = homeAddress.trim();
+            updated = true;
+          }
+          if (userData?.pincode) {
+            existingUser.pincode = userData.pincode.trim();
+            updated = true;
+          }
+          if (userData?.nearLandmark) {
+            existingUser.nearLandmark = userData.nearLandmark.trim();
+            updated = true;
+          }
+          if (updated) {
+            await existingUser.save();
+          }
+          
+          const token = generateToken(existingUser._id, existingUser.email || existingUser.phone, existingUser.role);
+          const userResponse = {
+            id: existingUser._id,
+            _id: existingUser._id,
+            name: existingUser.name || 'Guest User',
+            email: existingUser.email || null,
+            role: existingUser.role,
+            phone: existingUser.phone,
+            homeAddress: existingUser.homeAddress || '',
+            nearLandmark: existingUser.nearLandmark || '',
+            pincode: existingUser.pincode || '',
+            alternateNumber: existingUser.alternateNumber || '',
             address: {
               homeAddress: existingUser.homeAddress || '',
               nearLandmark: existingUser.nearLandmark || '',
@@ -1008,12 +1189,104 @@ exports.verifySignupOTP = async (req, res, next) => {
           });
         }
       }
+      
+      // ✅ SEAMLESS CHECKOUT: Handle email duplicate (non-null email)
+      if (field === 'email' && error.keyValue?.email !== null && phoneDigits) {
+        // Try to find existing user by phone
+        const existingUser = await User.findOne({ phone: phoneDigits });
+        if (existingUser) {
+          const token = generateToken(existingUser._id, existingUser.email || existingUser.phone, existingUser.role);
+          const userResponse = {
+            id: existingUser._id,
+            _id: existingUser._id,
+            name: existingUser.name || 'Guest User',
+            email: existingUser.email || null,
+            role: existingUser.role,
+            phone: existingUser.phone,
+            homeAddress: existingUser.homeAddress || '',
+            nearLandmark: existingUser.nearLandmark || '',
+            pincode: existingUser.pincode || '',
+            alternateNumber: existingUser.alternateNumber || '',
+            address: {
+              homeAddress: existingUser.homeAddress || '',
+              nearLandmark: existingUser.nearLandmark || '',
+              pincode: existingUser.pincode || '',
+              alternateNumber: existingUser.alternateNumber || ''
+            }
+          };
+          return res.json({
+            success: true,
+            message: 'Account created successfully',
+            token,
+            user: userResponse
+          });
+        }
+      }
+      
+      // ✅ SEAMLESS CHECKOUT: For any duplicate error, try to find existing user by phone
+      // This handles edge cases where phoneDigits might not be set or field is unknown
+      if (phoneDigits) {
+        const existingUser = await User.findOne({ phone: phoneDigits });
+        if (existingUser) {
+          // Update user profile if data provided
+          let updated = false;
+          if (name && name.trim()) {
+            existingUser.name = name.trim();
+            updated = true;
+          }
+          if (homeAddress && homeAddress.trim()) {
+            existingUser.homeAddress = homeAddress.trim();
+            updated = true;
+          }
+          if (userData?.pincode) {
+            existingUser.pincode = userData.pincode.trim();
+            updated = true;
+          }
+          if (userData?.nearLandmark) {
+            existingUser.nearLandmark = userData.nearLandmark.trim();
+            updated = true;
+          }
+          if (updated) {
+            await existingUser.save();
+          }
+          
+          const token = generateToken(existingUser._id, existingUser.email || existingUser.phone, existingUser.role);
+          const userResponse = {
+            id: existingUser._id,
+            _id: existingUser._id,
+            name: existingUser.name || 'Guest User',
+            email: existingUser.email || null,
+            role: existingUser.role,
+            phone: existingUser.phone,
+            homeAddress: existingUser.homeAddress || '',
+            nearLandmark: existingUser.nearLandmark || '',
+            pincode: existingUser.pincode || '',
+            alternateNumber: existingUser.alternateNumber || '',
+            address: {
+              homeAddress: existingUser.homeAddress || '',
+              nearLandmark: existingUser.nearLandmark || '',
+              pincode: existingUser.pincode || '',
+              alternateNumber: existingUser.alternateNumber || ''
+            }
+          };
+          return res.json({
+            success: true,
+            message: 'Login successful',
+            token,
+            user: userResponse
+          });
+        }
+      }
+      
+      // If we can't handle the duplicate error gracefully, log it and return a user-friendly message
+      console.error('Duplicate key error that could not be handled gracefully:', error);
       return res.status(400).json({
         success: false,
-        message: `${field === 'phone' ? 'Phone number' : 'Email'} already exists`,
+        message: 'An account with this information already exists. Please try logging in.',
         error: 'DUPLICATE_ENTRY'
       });
     }
+    // For non-duplicate errors, pass to error handler
     next(error);
   }
 };
