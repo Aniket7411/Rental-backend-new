@@ -95,24 +95,59 @@ exports.getUserOrders = async (req, res, next) => {
   }
 };
 
+// Helper function to compare user IDs robustly
+const compareUserIds = (id1, id2) => {
+  if (!id1 || !id2) return false;
+  
+  // Handle populated user object (has _id property)
+  let actualId1 = id1;
+  if (id1 && typeof id1 === 'object' && id1._id) {
+    actualId1 = id1._id;
+  }
+  
+  // Handle populated user object (has _id property)
+  let actualId2 = id2;
+  if (id2 && typeof id2 === 'object' && id2._id) {
+    actualId2 = id2._id;
+  }
+  
+  // Convert both to strings and trim
+  const str1 = String(actualId1).trim();
+  const str2 = String(actualId2).trim();
+  
+  // Direct string comparison
+  if (str1 === str2) return true;
+  
+  // If using Mongoose ObjectIds, try ObjectId comparison
+  if (mongoose.Types.ObjectId.isValid(str1) && mongoose.Types.ObjectId.isValid(str2)) {
+    try {
+      const objId1 = new mongoose.Types.ObjectId(str1);
+      const objId2 = new mongoose.Types.ObjectId(str2);
+      if (objId1.equals(objId2)) return true;
+    } catch (e) {
+      // Ignore conversion errors
+    }
+  }
+  
+  return false;
+};
+
 // Get Order by ID
 exports.getOrderById = async (req, res, next) => {
   try {
+    // ✅ ORDER PERMISSION FIX: Get user ID from req.user (which is the full User document from auth middleware)
     const userId = req.user._id || req.user.id;
     const userRole = req.user.role;
     const orderIdentifier = req.params.orderId;
 
-    // Build base query - admins can view any order, users can only view their own
-    const userQuery = userRole !== 'admin' ? { userId } : {};
-
-    // Check if orderIdentifier is a valid MongoDB ObjectId
+    // ✅ ORDER PERMISSION FIX: Don't filter by userId in query - find order first, then check authorization
+    // This allows us to properly handle populated userId objects
     let order = null;
 
     if (mongoose.Types.ObjectId.isValid(orderIdentifier)) {
       // Try finding by MongoDB _id
       order = await Order.findOne({
-        _id: orderIdentifier,
-        ...userQuery
+        _id: orderIdentifier
       })
         .populate('items.productId')
         .populate('items.serviceId')
@@ -122,8 +157,7 @@ exports.getOrderById = async (req, res, next) => {
     // If not found, try finding by orderId string (e.g., "ORD-2025-295")
     if (!order) {
       order = await Order.findOne({
-        orderId: orderIdentifier,
-        ...userQuery
+        orderId: orderIdentifier
       })
         .populate('items.productId')
         .populate('items.serviceId')
@@ -138,13 +172,19 @@ exports.getOrderById = async (req, res, next) => {
       });
     }
 
-    // ✅ PENDING ORDER PAYMENT RETRY: Verify user authorization for non-admin users
-    if (userRole !== 'admin' && order.userId.toString() !== userId.toString()) {
-      return res.status(403).json({
-        success: false,
-        message: 'You do not have permission to access this order',
-        error: 'FORBIDDEN'
-      });
+    // ✅ ORDER PERMISSION FIX: Use robust ID comparison function
+    // Handle both populated userId (object with _id) and non-populated userId (ObjectId or string)
+    const orderUserId = order.userId?._id || order.userId;
+    
+    // For non-admin users, verify they own the order
+    if (userRole !== 'admin') {
+      if (!compareUserIds(orderUserId, userId)) {
+        return res.status(403).json({
+          success: false,
+          message: 'You do not have permission to access this order',
+          error: 'FORBIDDEN'
+        });
+      }
     }
 
     // Format order to ensure all monetary values are rounded
@@ -1770,7 +1810,8 @@ exports.createRazorpayOrderForPendingOrder = async (req, res, next) => {
     const orderIdentifier = req.params.orderId;
     const { amount } = req.body;
 
-    // Validate amount
+    // ✅ COMPLETE PENDING ORDERS: Accept amount in paise (as per frontend requirement)
+    // Frontend sends amount in paise (e.g., 475000 for ₹4750.00)
     if (amount === undefined || amount === null) {
       return res.status(400).json({
         success: false,
@@ -1779,31 +1820,32 @@ exports.createRazorpayOrderForPendingOrder = async (req, res, next) => {
       });
     }
 
-    // Validate and round amount
-    const roundedAmount = validateAndRoundMoney(amount, 'payment amount');
-    if (roundedAmount <= 0) {
+    // Validate amount is a positive number
+    const amountInPaise = parseInt(amount, 10);
+    if (isNaN(amountInPaise) || amountInPaise <= 0) {
       return res.status(400).json({
         success: false,
-        message: 'Amount must be greater than 0',
+        message: 'Amount must be a positive number (in paise)',
         error: 'VALIDATION_ERROR'
       });
     }
 
-    // Find order - support both MongoDB _id and orderId string
+    // Convert paise to rupees for validation (order amounts are in rupees)
+    const amountInRupees = amountInPaise / 100;
+    const roundedAmountInRupees = roundMoney(amountInRupees);
+
+    // ✅ ORDER PERMISSION FIX: Find order first, then check authorization (don't filter in query)
     let order = null;
-    const userQuery = userRole !== 'admin' ? { userId } : {};
 
     if (mongoose.Types.ObjectId.isValid(orderIdentifier)) {
       order = await Order.findOne({
-        _id: orderIdentifier,
-        ...userQuery
+        _id: orderIdentifier
       });
     }
 
     if (!order) {
       order = await Order.findOne({
-        orderId: orderIdentifier,
-        ...userQuery
+        orderId: orderIdentifier
       });
     }
 
@@ -1815,8 +1857,9 @@ exports.createRazorpayOrderForPendingOrder = async (req, res, next) => {
       });
     }
 
-    // ✅ PENDING ORDER PAYMENT RETRY: Verify user authorization
-    if (userRole !== 'admin' && order.userId.toString() !== userId.toString()) {
+    // ✅ ORDER PERMISSION FIX: Use robust ID comparison function
+    const orderUserId = order.userId?._id || order.userId;
+    if (userRole !== 'admin' && !compareUserIds(orderUserId, userId)) {
       return res.status(403).json({
         success: false,
         message: 'You do not have permission to access this order',
@@ -1877,19 +1920,21 @@ exports.createRazorpayOrderForPendingOrder = async (req, res, next) => {
       });
     }
 
-    // Validate amount matches expected amount
-    const roundedExpected = roundMoney(expectedAmount);
-    const roundedProvided = roundMoney(roundedAmount);
-    const difference = Math.abs(roundedProvided - roundedExpected);
+    // ✅ COMPLETE PENDING ORDERS: Validate amount matches expected amount
+    // Convert expected amount to paise for comparison
+    const expectedAmountInPaise = Math.round(expectedAmount * 100);
+    const difference = Math.abs(amountInPaise - expectedAmountInPaise);
 
-    if (difference > 0.01) {
+    if (difference > 1) { // Allow 1 paise difference for rounding
       return res.status(400).json({
         success: false,
         message: 'Payment amount mismatch',
         error: 'AMOUNT_MISMATCH',
         details: {
-          expectedAmount: roundedExpected,
-          providedAmount: roundedProvided,
+          expectedAmount: expectedAmountInPaise, // in paise
+          providedAmount: amountInPaise, // in paise
+          expectedAmountRupees: expectedAmount, // in rupees for reference
+          providedAmountRupees: roundedAmountInRupees, // in rupees for reference
           difference: difference
         }
       });
@@ -1904,17 +1949,17 @@ exports.createRazorpayOrderForPendingOrder = async (req, res, next) => {
       });
     }
 
-    // Minimum amount validation
-    const MINIMUM_AMOUNT = 1.00;
-    if (roundedAmount < MINIMUM_AMOUNT) {
+    // ✅ COMPLETE PENDING ORDERS: Minimum amount validation (100 paise = ₹1.00)
+    const MINIMUM_AMOUNT_PAISE = 100;
+    if (amountInPaise < MINIMUM_AMOUNT_PAISE) {
       return res.status(400).json({
         success: false,
-        message: `Payment amount (₹${roundedAmount}) is less than minimum allowed amount (₹${MINIMUM_AMOUNT})`,
+        message: `Payment amount (${amountInPaise} paise = ₹${roundedAmountInRupees}) is less than minimum allowed amount (₹1.00)`,
         error: 'AMOUNT_TOO_LOW'
       });
     }
 
-    // Create Razorpay order
+    // ✅ COMPLETE PENDING ORDERS: Create Razorpay order with amount in paise
     const Razorpay = require('razorpay');
     const razorpayInstance = new Razorpay({
       key_id: process.env.RAZORPAY_KEY_ID,
@@ -1922,9 +1967,8 @@ exports.createRazorpayOrderForPendingOrder = async (req, res, next) => {
     });
 
     try {
-      const amountInPaise = Math.round(roundedAmount * 100);
       const razorpayOrder = await razorpayInstance.orders.create({
-        amount: amountInPaise,
+        amount: amountInPaise, // Use amount directly in paise
         currency: 'INR',
         receipt: order.orderId,
         notes: {
@@ -1938,7 +1982,7 @@ exports.createRazorpayOrderForPendingOrder = async (req, res, next) => {
         success: true,
         data: {
           razorpay_order_id: razorpayOrder.id,
-          amount: amountInPaise, // in paise
+          amount: amountInPaise, // Return amount in paise (as per document)
           currency: 'INR'
         }
       });
@@ -1972,21 +2016,18 @@ exports.verifyPaymentForPendingOrder = async (req, res, next) => {
       });
     }
 
-    // Find order - support both MongoDB _id and orderId string
+    // ✅ ORDER PERMISSION FIX: Find order first, then check authorization (don't filter in query)
     let order = null;
-    const userQuery = userRole !== 'admin' ? { userId } : {};
 
     if (mongoose.Types.ObjectId.isValid(orderIdentifier)) {
       order = await Order.findOne({
-        _id: orderIdentifier,
-        ...userQuery
+        _id: orderIdentifier
       });
     }
 
     if (!order) {
       order = await Order.findOne({
-        orderId: orderIdentifier,
-        ...userQuery
+        orderId: orderIdentifier
       });
     }
 
@@ -1998,8 +2039,9 @@ exports.verifyPaymentForPendingOrder = async (req, res, next) => {
       });
     }
 
-    // ✅ PENDING ORDER PAYMENT RETRY: Verify user authorization
-    if (userRole !== 'admin' && order.userId.toString() !== userId.toString()) {
+    // ✅ ORDER PERMISSION FIX: Use robust ID comparison function
+    const orderUserId = order.userId?._id || order.userId;
+    if (userRole !== 'admin' && !compareUserIds(orderUserId, userId)) {
       return res.status(403).json({
         success: false,
         message: 'You do not have permission to access this order',
@@ -2149,11 +2191,26 @@ exports.verifyPaymentForPendingOrder = async (req, res, next) => {
         .populate('items.serviceId')
         .populate('userId', 'name email phone');
 
+      // ✅ COMPLETE PENDING ORDERS: Return response matching document format
+      const formattedOrder = formatOrderResponse(updatedOrder);
+      
       res.json({
         success: true,
         message: 'Payment verified successfully',
         data: {
-          order: formatOrderResponse(updatedOrder)
+          order: {
+            ...formattedOrder,
+            // Ensure all required fields are present
+            _id: formattedOrder._id,
+            orderId: formattedOrder.orderId,
+            status: formattedOrder.status,
+            paymentStatus: formattedOrder.paymentStatus,
+            paymentDetails: formattedOrder.paymentDetails || {
+              razorpay_order_id: razorpay_order_id,
+              razorpay_payment_id: razorpay_payment_id,
+              paidAt: new Date()
+            }
+          }
         }
       });
     } catch (razorpayError) {
