@@ -201,7 +201,7 @@ exports.forgotPassword = async (req, res, next) => {
     try {
       // Send password reset email
       await sendPasswordResetEmail(user.email, resetUrl, user.name);
-      
+
       res.json({
         success: true,
         message: 'Password reset link sent to your email'
@@ -211,12 +211,12 @@ exports.forgotPassword = async (req, res, next) => {
       user.resetPasswordToken = undefined;
       user.resetPasswordExpire = undefined;
       await user.save({ validateBeforeSave: false });
-      
+
       // Log detailed error information
       console.error('❌ Error sending password reset email:');
       console.error('Error message:', emailError.message);
       console.error('Error stack:', emailError.stack);
-      
+
       // Return error response
       return res.status(500).json({
         success: false,
@@ -306,12 +306,12 @@ exports.sendOTP = async (req, res, next) => {
     // Validate and normalize phone number format
     // Accept formats: "+911234567890" or "1234567890" (10 digits)
     let phoneDigits = phone.replace(/\D/g, '');
-    
+
     // If phone starts with +91 or 91, extract last 10 digits
     if (phoneDigits.startsWith('91') && phoneDigits.length === 12) {
       phoneDigits = phoneDigits.slice(2); // Remove "91" prefix
     }
-    
+
     // Validate: must be exactly 10 digits
     if (phoneDigits.length !== 10) {
       return res.status(400).json({
@@ -364,7 +364,7 @@ exports.sendOTP = async (req, res, next) => {
     // Send OTP via Twilio
     try {
       await sendTwilioOTP(phoneDigits, otp);
-      
+
       res.json({
         success: true,
         message: 'OTP sent successfully to your phone number',
@@ -374,7 +374,7 @@ exports.sendOTP = async (req, res, next) => {
       // If Twilio fails, still return success but log the error
       // In production, you might want to handle this differently
       console.error('Twilio error:', twilioError);
-      
+
       // For development, you might want to return the OTP
       if (process.env.NODE_ENV === 'development') {
         console.log(`🔐 Development OTP for ${phoneDigits}: ${otp}`);
@@ -386,7 +386,7 @@ exports.sendOTP = async (req, res, next) => {
           ...(process.env.NODE_ENV === 'development' && { otp })
         });
       }
-      
+
       return res.status(500).json({
         success: false,
         message: 'Failed to send OTP. Please try again later.',
@@ -458,7 +458,7 @@ exports.verifyOTP = async (req, res, next) => {
     if (otpRecord.otp !== otp) {
       otpRecord.attempts += 1;
       await otpRecord.save();
-      
+
       return res.status(400).json({
         success: false,
         message: 'Invalid OTP',
@@ -532,12 +532,12 @@ exports.sendSignupOTP = async (req, res, next) => {
     // Validate and normalize phone number format
     // Accept formats: "+911234567890" or "1234567890" (10 digits)
     let phoneDigits = phone.replace(/\D/g, '');
-    
+
     // If phone starts with +91 or 91, extract last 10 digits
     if (phoneDigits.startsWith('91') && phoneDigits.length === 12) {
       phoneDigits = phoneDigits.slice(2); // Remove "91" prefix
     }
-    
+
     // Validate: must be exactly 10 digits
     if (phoneDigits.length !== 10) {
       return res.status(400).json({
@@ -559,7 +559,7 @@ exports.sendSignupOTP = async (req, res, next) => {
     // ✅ SEAMLESS CHECKOUT: Always send signup OTP (don't differentiate between new/existing users)
     // Whether user is new or existing will be handled during OTP verification
     // This allows seamless checkout for all users without blocking them
-    
+
     // ✅ DO NOT check if user exists here - send OTP anyway
     // ✅ DO NOT check if email exists here - send OTP anyway
     // All checks will be handled gracefully during verification
@@ -601,7 +601,7 @@ exports.sendSignupOTP = async (req, res, next) => {
     // Send OTP via Twilio
     try {
       await sendTwilioOTP(phoneDigits, otp);
-      
+
       res.json({
         success: true,
         message: 'OTP sent successfully',
@@ -609,7 +609,7 @@ exports.sendSignupOTP = async (req, res, next) => {
       });
     } catch (twilioError) {
       console.error('Twilio error:', twilioError);
-      
+
       if (process.env.NODE_ENV === 'development') {
         console.log(`🔐 Development OTP for ${phoneDigits}: ${otp}`);
         return res.json({
@@ -619,7 +619,7 @@ exports.sendSignupOTP = async (req, res, next) => {
           ...(process.env.NODE_ENV === 'development' && { otp })
         });
       }
-      
+
       return res.status(500).json({
         success: false,
         message: 'Failed to send OTP. Please try again later.',
@@ -635,10 +635,10 @@ exports.sendSignupOTP = async (req, res, next) => {
 exports.verifySignupOTP = async (req, res, next) => {
   // Extract phoneDigits early so it's available in catch blocks
   let phoneDigits = null;
-  
+
   try {
     const { phone, otp, sessionId, name, email, homeAddress, userData } = req.body;
-    
+
     // Extract address from userData if provided (for guest checkout)
     const providedAddress = userData?.homeAddress || homeAddress;
 
@@ -657,7 +657,7 @@ exports.verifySignupOTP = async (req, res, next) => {
     if (phoneDigits.startsWith('91') && phoneDigits.length === 12) {
       phoneDigits = phoneDigits.slice(2); // Remove "91" prefix to get 10-digit number
     }
-    
+
     // Validate phone number length (should be 10 digits)
     if (phoneDigits.length !== 10) {
       return res.status(400).json({
@@ -717,7 +717,7 @@ exports.verifySignupOTP = async (req, res, next) => {
     if (otpRecord.otp !== otp) {
       otpRecord.attempts += 1;
       await otpRecord.save();
-      
+
       return res.status(400).json({
         success: false,
         message: 'Invalid OTP',
@@ -814,7 +814,8 @@ exports.verifySignupOTP = async (req, res, next) => {
 
       return res.json({
         success: true,
-        message: 'Login successful',
+        message: 'Wow! You already have an account with us. Welcome back!',
+        existingUser: true, // Flag to indicate user already existed
         token,
         user: userResponse
       });
@@ -824,16 +825,16 @@ exports.verifySignupOTP = async (req, res, next) => {
     // Use name from request or from OTP record, or default
     const userName = name ? name.trim() : (otpRecord.userData?.name || 'Guest User');
     let userEmail = email ? email.toLowerCase().trim() : (otpRecord.userData?.email || undefined);
-    
+
     // Extract address - prioritize userData.homeAddress, then homeAddress parameter, then from OTP record
     const finalAddress = providedAddress || (homeAddress ? homeAddress.trim() : '');
-    
+
     // For guest checkout, address should be mandatory for new users
     // But we'll allow creation without address for backward compatibility (log warning)
     if (!finalAddress || !finalAddress.trim()) {
       console.log(`[WARN] Guest checkout user creation without address for phone ${phoneDigits}`);
     }
-    
+
     // If email is provided, check if it exists in another account
     // Handle email conflicts gracefully
     if (userEmail) {
@@ -861,7 +862,7 @@ exports.verifySignupOTP = async (req, res, next) => {
         guestCheckoutDate: new Date() // Record when user was created via guest checkout
         // Password is optional - not required for OTP-based auth
       };
-      
+
       // Only add email if it's provided (don't set to null/undefined - omit the field)
       // This ensures the sparse index works correctly even if database index isn't sparse yet
       if (userEmail) {
@@ -869,7 +870,7 @@ exports.verifySignupOTP = async (req, res, next) => {
       }
       // If email is not provided, don't include it in the create object
       // This prevents "email: null" from being stored, which causes duplicate errors
-      
+
       user = await User.create(userDataToCreate);
     } catch (createError) {
       // Handle duplicate key errors gracefully
@@ -901,7 +902,8 @@ exports.verifySignupOTP = async (req, res, next) => {
             };
             return res.json({
               success: true,
-              message: 'Login successful',
+              message: 'Wow! You already have an account with us. Welcome back!',
+              existingUser: true, // Flag to indicate user already existed
               token,
               user: userResponse
             });
@@ -952,7 +954,8 @@ exports.verifySignupOTP = async (req, res, next) => {
                 };
                 return res.json({
                   success: true,
-                  message: 'Account created successfully',
+                  message: 'Wow! You already have an account with us. Welcome back!',
+                  existingUser: true, // Flag to indicate user already existed
                   token,
                   user: userResponse
                 });
@@ -987,7 +990,8 @@ exports.verifySignupOTP = async (req, res, next) => {
               };
               return res.json({
                 success: true,
-                message: 'Account created successfully',
+                message: 'Wow! You already have an account with us. Welcome back!',
+                existingUser: true, // Flag to indicate user already existed
                 token,
                 user: userResponse
               });
@@ -1033,7 +1037,7 @@ exports.verifySignupOTP = async (req, res, next) => {
     // Handle duplicate key error (phone or email)
     if (error.code === 11000) {
       const field = Object.keys(error.keyPattern)[0];
-      
+
       // Extract phoneDigits from request if not already defined
       if (!phoneDigits && req.body?.phone) {
         phoneDigits = req.body.phone.replace(/\D/g, ''); // Handles spaces: "+91 8318825828" → "918318825828"
@@ -1041,7 +1045,7 @@ exports.verifySignupOTP = async (req, res, next) => {
           phoneDigits = phoneDigits.slice(2); // → "8318825828"
         }
       }
-      
+
       // ✅ CRITICAL FIX: Handle email:null duplicate error (database index not sparse)
       // This happens when multiple users try to create accounts without email
       // The database index on email might not be sparse, causing duplicate key errors for null values
@@ -1070,7 +1074,7 @@ exports.verifySignupOTP = async (req, res, next) => {
           if (updated) {
             await existingUser.save();
           }
-          
+
           const token = generateToken(existingUser._id, existingUser.email || existingUser.phone, existingUser.role);
           const userResponse = {
             id: existingUser._id,
@@ -1092,12 +1096,13 @@ exports.verifySignupOTP = async (req, res, next) => {
           };
           return res.json({
             success: true,
-            message: 'Login successful',
+            message: 'Wow! You already have an account with us. Welcome back!',
+            existingUser: true, // Flag to indicate user already existed
             token,
             user: userResponse
           });
         }
-        
+
         // If user not found by phone, try to create without email (retry with different approach)
         // This handles the case where the database index is not sparse
         console.log(`[WARN] Email null duplicate error for phone ${phoneDigits}. Attempting to find or create user.`);
@@ -1126,7 +1131,8 @@ exports.verifySignupOTP = async (req, res, next) => {
             };
             return res.json({
               success: true,
-              message: 'Login successful',
+              message: 'Wow! You already have an account with us. Welcome back!',
+              existingUser: true, // Flag to indicate user already existed
               token,
               user: userResponse
             });
@@ -1135,7 +1141,7 @@ exports.verifySignupOTP = async (req, res, next) => {
           console.error('Error finding user by phone:', findError);
         }
       }
-      
+
       if (field === 'phone' && phoneDigits) {
         // Phone already exists - try to find and login instead
         const existingUser = await User.findOne({ phone: phoneDigits });
@@ -1161,7 +1167,7 @@ exports.verifySignupOTP = async (req, res, next) => {
           if (updated) {
             await existingUser.save();
           }
-          
+
           const token = generateToken(existingUser._id, existingUser.email || existingUser.phone, existingUser.role);
           const userResponse = {
             id: existingUser._id,
@@ -1183,13 +1189,14 @@ exports.verifySignupOTP = async (req, res, next) => {
           };
           return res.json({
             success: true,
-            message: 'Login successful',
+            message: 'Wow! You already have an account with us. Welcome back!',
+            existingUser: true, // Flag to indicate user already existed
             token,
             user: userResponse
           });
         }
       }
-      
+
       // ✅ SEAMLESS CHECKOUT: Handle email duplicate (non-null email)
       if (field === 'email' && error.keyValue?.email !== null && phoneDigits) {
         // Try to find existing user by phone
@@ -1216,13 +1223,14 @@ exports.verifySignupOTP = async (req, res, next) => {
           };
           return res.json({
             success: true,
-            message: 'Account created successfully',
+            message: 'Wow! You already have an account with us. Welcome back!',
+            existingUser: true, // Flag to indicate user already existed
             token,
             user: userResponse
           });
         }
       }
-      
+
       // ✅ SEAMLESS CHECKOUT: For any duplicate error, try to find existing user by phone
       // This handles edge cases where phoneDigits might not be set or field is unknown
       if (phoneDigits) {
@@ -1249,7 +1257,7 @@ exports.verifySignupOTP = async (req, res, next) => {
           if (updated) {
             await existingUser.save();
           }
-          
+
           const token = generateToken(existingUser._id, existingUser.email || existingUser.phone, existingUser.role);
           const userResponse = {
             id: existingUser._id,
@@ -1271,14 +1279,71 @@ exports.verifySignupOTP = async (req, res, next) => {
           };
           return res.json({
             success: true,
-            message: 'Login successful',
+            message: 'Wow! You already have an account with us. Welcome back!',
+            existingUser: true, // Flag to indicate user already existed
             token,
             user: userResponse
           });
         }
       }
-      
-      // If we can't handle the duplicate error gracefully, log it and return a user-friendly message
+
+      // ✅ SEAMLESS CHECKOUT: Last attempt to find existing user before returning error
+      // This handles edge cases where phoneDigits might not be set correctly
+      if (phoneDigits) {
+        const existingUser = await User.findOne({ phone: phoneDigits });
+        if (existingUser) {
+          // Update user profile if data provided
+          let updated = false;
+          if (name && name.trim()) {
+            existingUser.name = name.trim();
+            updated = true;
+          }
+          if (homeAddress && homeAddress.trim()) {
+            existingUser.homeAddress = homeAddress.trim();
+            updated = true;
+          }
+          if (userData?.pincode) {
+            existingUser.pincode = userData.pincode.trim();
+            updated = true;
+          }
+          if (userData?.nearLandmark) {
+            existingUser.nearLandmark = userData.nearLandmark.trim();
+            updated = true;
+          }
+          if (updated) {
+            await existingUser.save();
+          }
+
+          const token = generateToken(existingUser._id, existingUser.email || existingUser.phone, existingUser.role);
+          const userResponse = {
+            id: existingUser._id,
+            _id: existingUser._id,
+            name: existingUser.name || 'Guest User',
+            email: existingUser.email || null,
+            role: existingUser.role,
+            phone: existingUser.phone,
+            homeAddress: existingUser.homeAddress || '',
+            nearLandmark: existingUser.nearLandmark || '',
+            pincode: existingUser.pincode || '',
+            alternateNumber: existingUser.alternateNumber || '',
+            address: {
+              homeAddress: existingUser.homeAddress || '',
+              nearLandmark: existingUser.nearLandmark || '',
+              pincode: existingUser.pincode || '',
+              alternateNumber: existingUser.alternateNumber || ''
+            }
+          };
+          return res.json({
+            success: true,
+            message: 'Wow! You already have an account with us. Welcome back!',
+            existingUser: true, // Flag to indicate user already existed
+            token,
+            user: userResponse
+          });
+        }
+      }
+
+      // If we still can't handle the duplicate error gracefully, log it and return a user-friendly message
       console.error('Duplicate key error that could not be handled gracefully:', error);
       return res.status(400).json({
         success: false,

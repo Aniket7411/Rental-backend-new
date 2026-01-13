@@ -138,6 +138,15 @@ exports.getOrderById = async (req, res, next) => {
       });
     }
 
+    // ✅ PENDING ORDER PAYMENT RETRY: Verify user authorization for non-admin users
+    if (userRole !== 'admin' && order.userId.toString() !== userId.toString()) {
+      return res.status(403).json({
+        success: false,
+        message: 'You do not have permission to access this order',
+        error: 'FORBIDDEN'
+      });
+    }
+
     // Format order to ensure all monetary values are rounded
     const formattedOrder = formatOrderResponse(order);
 
@@ -1748,6 +1757,413 @@ exports.getRefundStatus = async (req, res, next) => {
       success: true,
       data: refund
     });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// ✅ PENDING ORDER PAYMENT RETRY: Create Razorpay Order for Pending Order
+exports.createRazorpayOrderForPendingOrder = async (req, res, next) => {
+  try {
+    const userId = req.user._id || req.user.id;
+    const userRole = req.user.role;
+    const orderIdentifier = req.params.orderId;
+    const { amount } = req.body;
+
+    // Validate amount
+    if (amount === undefined || amount === null) {
+      return res.status(400).json({
+        success: false,
+        message: 'Amount is required',
+        error: 'VALIDATION_ERROR'
+      });
+    }
+
+    // Validate and round amount
+    const roundedAmount = validateAndRoundMoney(amount, 'payment amount');
+    if (roundedAmount <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Amount must be greater than 0',
+        error: 'VALIDATION_ERROR'
+      });
+    }
+
+    // Find order - support both MongoDB _id and orderId string
+    let order = null;
+    const userQuery = userRole !== 'admin' ? { userId } : {};
+
+    if (mongoose.Types.ObjectId.isValid(orderIdentifier)) {
+      order = await Order.findOne({
+        _id: orderIdentifier,
+        ...userQuery
+      });
+    }
+
+    if (!order) {
+      order = await Order.findOne({
+        orderId: orderIdentifier,
+        ...userQuery
+      });
+    }
+
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        message: 'Order not found',
+        error: 'NOT_FOUND'
+      });
+    }
+
+    // ✅ PENDING ORDER PAYMENT RETRY: Verify user authorization
+    if (userRole !== 'admin' && order.userId.toString() !== userId.toString()) {
+      return res.status(403).json({
+        success: false,
+        message: 'You do not have permission to access this order',
+        error: 'FORBIDDEN'
+      });
+    }
+
+    // ✅ PENDING ORDER PAYMENT RETRY: Validate order status
+    if (order.status !== 'pending') {
+      if (order.status === 'cancelled') {
+        return res.status(400).json({
+          success: false,
+          message: 'This order has been cancelled and cannot be paid',
+          error: 'ORDER_CANCELLED'
+        });
+      }
+      if (order.paymentStatus === 'paid') {
+        return res.status(400).json({
+          success: false,
+          message: 'This order has already been paid',
+          error: 'ORDER_ALREADY_PAID'
+        });
+      }
+      return res.status(400).json({
+        success: false,
+        message: `Only pending orders can be paid. Current status: ${order.status}`,
+        error: 'INVALID_ORDER_STATUS'
+      });
+    }
+
+    // ✅ PENDING ORDER PAYMENT RETRY: Validate payment status
+    if (order.paymentStatus !== 'pending') {
+      if (order.paymentStatus === 'paid') {
+        return res.status(400).json({
+          success: false,
+          message: 'This order has already been paid',
+          error: 'ORDER_ALREADY_PAID'
+        });
+      }
+      return res.status(400).json({
+        success: false,
+        message: `Only orders with pending payment can be paid. Current payment status: ${order.paymentStatus}`,
+        error: 'INVALID_PAYMENT_STATUS'
+      });
+    }
+
+    // ✅ PENDING ORDER PAYMENT RETRY: Determine expected payment amount
+    let expectedAmount = 0;
+    if (order.paymentOption === 'payNow') {
+      expectedAmount = order.finalTotal || 0;
+    } else if (order.paymentOption === 'payAdvance') {
+      expectedAmount = order.advanceAmount || 0;
+    } else {
+      return res.status(400).json({
+        success: false,
+        message: 'Payment retry is only available for payNow and payAdvance orders',
+        error: 'INVALID_PAYMENT_OPTION'
+      });
+    }
+
+    // Validate amount matches expected amount
+    const roundedExpected = roundMoney(expectedAmount);
+    const roundedProvided = roundMoney(roundedAmount);
+    const difference = Math.abs(roundedProvided - roundedExpected);
+
+    if (difference > 0.01) {
+      return res.status(400).json({
+        success: false,
+        message: 'Payment amount mismatch',
+        error: 'AMOUNT_MISMATCH',
+        details: {
+          expectedAmount: roundedExpected,
+          providedAmount: roundedProvided,
+          difference: difference
+        }
+      });
+    }
+
+    // Check Razorpay configuration
+    if (!process.env.RAZORPAY_KEY_ID || !process.env.RAZORPAY_KEY_SECRET) {
+      return res.status(500).json({
+        success: false,
+        message: 'Payment gateway not configured. Please contact support.',
+        error: 'CONFIGURATION_ERROR'
+      });
+    }
+
+    // Minimum amount validation
+    const MINIMUM_AMOUNT = 1.00;
+    if (roundedAmount < MINIMUM_AMOUNT) {
+      return res.status(400).json({
+        success: false,
+        message: `Payment amount (₹${roundedAmount}) is less than minimum allowed amount (₹${MINIMUM_AMOUNT})`,
+        error: 'AMOUNT_TOO_LOW'
+      });
+    }
+
+    // Create Razorpay order
+    const Razorpay = require('razorpay');
+    const razorpayInstance = new Razorpay({
+      key_id: process.env.RAZORPAY_KEY_ID,
+      key_secret: process.env.RAZORPAY_KEY_SECRET
+    });
+
+    try {
+      const amountInPaise = Math.round(roundedAmount * 100);
+      const razorpayOrder = await razorpayInstance.orders.create({
+        amount: amountInPaise,
+        currency: 'INR',
+        receipt: order.orderId,
+        notes: {
+          orderId: order.orderId,
+          userId: userId.toString(),
+          paymentRetry: 'true'
+        }
+      });
+
+      res.json({
+        success: true,
+        data: {
+          razorpay_order_id: razorpayOrder.id,
+          amount: amountInPaise, // in paise
+          currency: 'INR'
+        }
+      });
+    } catch (razorpayError) {
+      console.error('Razorpay order creation error:', razorpayError);
+      return res.status(500).json({
+        success: false,
+        message: razorpayError.error?.description || 'Failed to create Razorpay order. Please try again.',
+        error: 'PAYMENT_GATEWAY_ERROR'
+      });
+    }
+  } catch (error) {
+    next(error);
+  }
+};
+
+// ✅ PENDING ORDER PAYMENT RETRY: Verify Payment for Pending Order
+exports.verifyPaymentForPendingOrder = async (req, res, next) => {
+  try {
+    const userId = req.user._id || req.user.id;
+    const userRole = req.user.role;
+    const orderIdentifier = req.params.orderId;
+    const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body;
+
+    // Validate input
+    if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
+      return res.status(400).json({
+        success: false,
+        message: 'Razorpay order ID, payment ID, and signature are required',
+        error: 'VALIDATION_ERROR'
+      });
+    }
+
+    // Find order - support both MongoDB _id and orderId string
+    let order = null;
+    const userQuery = userRole !== 'admin' ? { userId } : {};
+
+    if (mongoose.Types.ObjectId.isValid(orderIdentifier)) {
+      order = await Order.findOne({
+        _id: orderIdentifier,
+        ...userQuery
+      });
+    }
+
+    if (!order) {
+      order = await Order.findOne({
+        orderId: orderIdentifier,
+        ...userQuery
+      });
+    }
+
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        message: 'Order not found',
+        error: 'NOT_FOUND'
+      });
+    }
+
+    // ✅ PENDING ORDER PAYMENT RETRY: Verify user authorization
+    if (userRole !== 'admin' && order.userId.toString() !== userId.toString()) {
+      return res.status(403).json({
+        success: false,
+        message: 'You do not have permission to access this order',
+        error: 'FORBIDDEN'
+      });
+    }
+
+    // ✅ PENDING ORDER PAYMENT RETRY: Validate order status
+    if (order.status === 'cancelled') {
+      return res.status(400).json({
+        success: false,
+        message: 'This order has been cancelled and cannot be paid',
+        error: 'ORDER_CANCELLED'
+      });
+    }
+
+    if (order.paymentStatus === 'paid') {
+      return res.status(400).json({
+        success: false,
+        message: 'This order has already been paid',
+        error: 'ORDER_ALREADY_PAID'
+      });
+    }
+
+    // Determine expected payment amount
+    let expectedAmount = 0;
+    if (order.paymentOption === 'payNow') {
+      expectedAmount = order.finalTotal || 0;
+    } else if (order.paymentOption === 'payAdvance') {
+      expectedAmount = order.advanceAmount || 0;
+    }
+
+    // Verify Razorpay signature
+    const crypto = require('crypto');
+    const generatedSignature = crypto
+      .createHmac('sha256', process.env.RAZORPAY_KEY_SECRET)
+      .update(`${razorpay_order_id}|${razorpay_payment_id}`)
+      .digest('hex');
+
+    if (generatedSignature !== razorpay_signature) {
+      return res.status(400).json({
+        success: false,
+        message: 'Payment verification failed',
+        error: 'SIGNATURE_MISMATCH'
+      });
+    }
+
+    // Verify payment with Razorpay API
+    const Razorpay = require('razorpay');
+    const razorpayInstance = new Razorpay({
+      key_id: process.env.RAZORPAY_KEY_ID,
+      key_secret: process.env.RAZORPAY_KEY_SECRET
+    });
+
+    try {
+      const razorpayPayment = await razorpayInstance.payments.fetch(razorpay_payment_id);
+
+      if (razorpayPayment.status !== 'captured' && razorpayPayment.status !== 'authorized') {
+        return res.status(400).json({
+          success: false,
+          message: `Payment not captured. Status: ${razorpayPayment.status}`,
+          error: 'PAYMENT_NOT_CAPTURED'
+        });
+      }
+
+      // Verify payment amount matches order amount
+      const paymentAmountInRupees = razorpayPayment.amount / 100; // Convert from paise
+      const roundedPaymentAmount = roundMoney(paymentAmountInRupees);
+      const roundedExpected = roundMoney(expectedAmount);
+      const difference = Math.abs(roundedPaymentAmount - roundedExpected);
+
+      if (difference > 0.01) {
+        return res.status(400).json({
+          success: false,
+          message: 'Payment amount mismatch',
+          error: 'AMOUNT_MISMATCH',
+          details: {
+            expectedAmount: roundedExpected,
+            providedAmount: roundedPaymentAmount
+          }
+        });
+      }
+
+      // Check for duplicate payment processing
+      const Payment = require('../models/Payment');
+      const existingPayment = await Payment.findOne({
+        transactionId: razorpay_payment_id,
+        status: 'Completed'
+      });
+
+      if (existingPayment) {
+        // Payment already processed - return existing order state
+        const updatedOrder = await Order.findById(order._id);
+        return res.json({
+          success: true,
+          message: 'Payment already verified',
+          data: {
+            order: formatOrderResponse(updatedOrder)
+          }
+        });
+      }
+
+      // Create payment record
+      const payment = await Payment.create({
+        orderId: order._id,
+        userId: order.userId,
+        amount: roundedPaymentAmount,
+        paymentMethod: order.paymentOption === 'payAdvance' ? 'advance' : 'razorpay',
+        paymentGateway: 'razorpay',
+        gatewayOrderId: razorpay_order_id,
+        transactionId: razorpay_payment_id,
+        razorpayPaymentId: razorpay_payment_id,
+        signature: razorpay_signature,
+        status: 'Completed',
+        paidAt: new Date()
+      });
+
+      // ✅ PENDING ORDER PAYMENT RETRY: Update order status and payment status
+      order.paymentStatus = 'paid';
+      order.status = 'confirmed';
+      order.paymentDetails = {
+        razorpay_order_id: razorpay_order_id,
+        razorpay_payment_id: razorpay_payment_id,
+        paidAt: new Date()
+      };
+      await order.save();
+
+      // Update product status to Rented Out for rental items
+      const Product = require('../models/Product');
+      for (const item of order.items) {
+        if (item.type === 'rental' && item.productId) {
+          await Product.findByIdAndUpdate(item.productId, { status: 'Rented Out' });
+        }
+      }
+
+      // Notify admin (non-blocking)
+      notifyAdmin(
+        `Payment Successful - Order ${order.orderId}`,
+        `Payment of ₹${roundedPaymentAmount} has been successfully processed for pending order retry.\n\nOrder ID: ${order.orderId}\nPayment ID: ${payment.paymentId}\nTransaction ID: ${razorpay_payment_id}`
+      ).catch(error => {
+        console.error('Failed to send payment notification:', error);
+      });
+
+      // Format and return updated order
+      const updatedOrder = await Order.findById(order._id)
+        .populate('items.productId')
+        .populate('items.serviceId')
+        .populate('userId', 'name email phone');
+
+      res.json({
+        success: true,
+        message: 'Payment verified successfully',
+        data: {
+          order: formatOrderResponse(updatedOrder)
+        }
+      });
+    } catch (razorpayError) {
+      console.error('Razorpay payment verification error:', razorpayError);
+      return res.status(400).json({
+        success: false,
+        message: razorpayError.error?.description || 'Payment verification failed',
+        error: 'PAYMENT_VERIFICATION_ERROR'
+      });
+    }
   } catch (error) {
     next(error);
   }
