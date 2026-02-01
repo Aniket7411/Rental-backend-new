@@ -30,8 +30,50 @@ function formatOrderResponse(order) {
     finalTotal: roundMoney(orderObj.finalTotal || 0),
     // Round advance payment fields if they exist
     advanceAmount: orderObj.advanceAmount !== null && orderObj.advanceAmount !== undefined ? roundMoney(orderObj.advanceAmount) : null,
-    remainingAmount: orderObj.remainingAmount !== null && orderObj.remainingAmount !== undefined ? roundMoney(orderObj.remainingAmount) : null
+    remainingAmount: orderObj.remainingAmount !== null && orderObj.remainingAmount !== undefined ? roundMoney(orderObj.remainingAmount) : null,
+    // Round refund amount if it exists
+    refundAmount: orderObj.refundAmount !== null && orderObj.refundAmount !== undefined ? roundMoney(orderObj.refundAmount) : null
   };
+
+  // Round refund amount in refund object if it exists
+  if (formatted.refund && formatted.refund.amount !== undefined && formatted.refund.amount !== null) {
+    formatted.refund = {
+      ...formatted.refund,
+      amount: roundMoney(formatted.refund.amount)
+    };
+  }
+
+  // Round refund amount in refundDetails if it exists
+  if (formatted.refundDetails && formatted.refundDetails.amount !== undefined && formatted.refundDetails.amount !== null) {
+    formatted.refundDetails = {
+      ...formatted.refundDetails,
+      amount: roundMoney(formatted.refundDetails.amount)
+    };
+  }
+
+  // Round refund amount in paymentDetails.refund if it exists
+  if (formatted.paymentDetails && formatted.paymentDetails.refund && formatted.paymentDetails.refund.amount !== undefined && formatted.paymentDetails.refund.amount !== null) {
+    formatted.paymentDetails = {
+      ...formatted.paymentDetails,
+      refund: {
+        ...formatted.paymentDetails.refund,
+        amount: roundMoney(formatted.paymentDetails.refund.amount)
+      }
+    };
+  }
+
+  // User-facing refund message for cancelled orders with refund (so website can show "Amount has been refunded")
+  if (formatted.status === 'cancelled' && formatted.refundStatus && formatted.refundAmount != null && formatted.refundAmount > 0) {
+    if (formatted.refundStatus === 'processed') {
+      formatted.refundDisplayMessage = 'Amount has been refunded to your account.';
+    } else if (formatted.refundStatus === 'pending') {
+      formatted.refundDisplayMessage = 'Refund is being processed. You will receive the amount shortly.';
+    } else if (formatted.refundStatus === 'failed') {
+      formatted.refundDisplayMessage = 'Refund could not be processed. Please contact support.';
+    }
+  } else {
+    formatted.refundDisplayMessage = null;
+  }
 
   // Round monetary fields in items array
   if (orderObj.items && Array.isArray(orderObj.items)) {

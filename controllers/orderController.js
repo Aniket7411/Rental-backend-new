@@ -28,6 +28,185 @@ const getRazorpayInstance = () => {
   return razorpayInstance;
 };
 
+// Helper function to populate refund information for an order
+const populateRefundInfo = async (order) => {
+  // Only populate refund info for cancelled orders with payment
+  if (order.status !== 'cancelled' || (order.paymentStatus !== 'paid' && order.paymentStatus !== 'refunded')) {
+    return order;
+  }
+
+  try {
+    // Find payment record
+    const payment = await Payment.findOne({ orderId: order._id });
+    
+    if (payment && payment.refundId) {
+      // Find refund record
+      const refund = await Refund.findById(payment.refundId);
+      
+      if (refund) {
+        // Convert refund to plain object if needed
+        const refundObj = refund.toObject ? refund.toObject() : { ...refund };
+        
+        // Create refund object for order
+        const refundInfo = {
+          refundId: refundObj.refundId || refundObj._id?.toString(),
+          razorpayRefundId: refundObj.razorpayRefundId,
+          paymentId: refundObj.paymentId?.toString() || refundObj.paymentId,
+          orderId: refundObj.orderId?.toString() || refundObj.orderId,
+          amount: refundObj.amount,
+          amountInPaise: refundObj.amountInPaise,
+          status: refundObj.status,
+          reason: refundObj.reason,
+          processedAt: refundObj.processedAt,
+          razorpayRefundData: refundObj.razorpayRefundData
+        };
+        
+        // Add refund to order object (multiple locations for frontend compatibility)
+        order.refund = refundInfo;
+        order.refundAmount = refundObj.amount;
+        order.refundStatus = refundObj.status;
+        order.refundId = refundInfo.refundId;
+        order.refundDetails = {
+          refundId: refundInfo.refundId,
+          amount: refundObj.amount,
+          status: refundObj.status,
+          processedAt: refundObj.processedAt
+        };
+        
+        // Add to paymentDetails if it exists
+        if (order.paymentDetails) {
+          order.paymentDetails.refund = {
+            refundId: refundInfo.refundId,
+            amount: refundObj.amount,
+            status: refundObj.status,
+            processedAt: refundObj.processedAt
+          };
+          order.paymentDetails.refundStatus = refundObj.status;
+        } else {
+          // Create paymentDetails if it doesn't exist
+          order.paymentDetails = {
+            refund: {
+              refundId: refundInfo.refundId,
+              amount: refundObj.amount,
+              status: refundObj.status,
+              processedAt: refundObj.processedAt
+            },
+            refundStatus: refundObj.status
+          };
+        }
+      }
+    }
+  } catch (error) {
+    // Log error but don't fail - just don't include refund info
+    console.error('Error populating refund info:', error);
+  }
+  
+  return order;
+};
+
+// Helper function to batch populate refund information for multiple orders
+const batchPopulateRefundInfo = async (orders) => {
+  // Filter cancelled orders with payments
+  const cancelledOrderIds = orders
+    .filter(o => o.status === 'cancelled' && (o.paymentStatus === 'paid' || o.paymentStatus === 'refunded'))
+    .map(o => o._id);
+  
+  if (cancelledOrderIds.length === 0) {
+    return orders;
+  }
+  
+  try {
+    // Fetch all payments for cancelled orders
+    const payments = await Payment.find({ 
+      orderId: { $in: cancelledOrderIds },
+      refundId: { $exists: true, $ne: null }
+    });
+    
+    if (payments.length === 0) {
+      return orders;
+    }
+    
+    // Fetch all refunds
+    const refundIds = payments.map(p => p.refundId).filter(Boolean);
+    const refunds = await Refund.find({ _id: { $in: refundIds } });
+    
+    // Create maps for quick lookup
+    const refundMap = new Map();
+    refunds.forEach(refund => {
+      const refundObj = refund.toObject ? refund.toObject() : { ...refund };
+      refundMap.set(refund._id.toString(), refundObj);
+    });
+    
+    const paymentMap = new Map();
+    payments.forEach(payment => {
+      paymentMap.set(payment.orderId.toString(), payment);
+    });
+    
+    // Attach refund info to orders
+    orders.forEach(order => {
+      if (order.status === 'cancelled' && (order.paymentStatus === 'paid' || order.paymentStatus === 'refunded')) {
+        const payment = paymentMap.get(order._id.toString());
+        if (payment && payment.refundId) {
+          const refund = refundMap.get(payment.refundId.toString());
+          if (refund) {
+            const refundInfo = {
+              refundId: refund.refundId || refund._id?.toString(),
+              razorpayRefundId: refund.razorpayRefundId,
+              paymentId: refund.paymentId?.toString() || refund.paymentId,
+              orderId: refund.orderId?.toString() || refund.orderId,
+              amount: refund.amount,
+              amountInPaise: refund.amountInPaise,
+              status: refund.status,
+              reason: refund.reason,
+              processedAt: refund.processedAt,
+              razorpayRefundData: refund.razorpayRefundData
+            };
+            
+            // Add refund to order object (multiple locations for frontend compatibility)
+            order.refund = refundInfo;
+            order.refundAmount = refund.amount;
+            order.refundStatus = refund.status;
+            order.refundId = refundInfo.refundId;
+            order.refundDetails = {
+              refundId: refundInfo.refundId,
+              amount: refund.amount,
+              status: refund.status,
+              processedAt: refund.processedAt
+            };
+            
+            // Add to paymentDetails if it exists
+            if (order.paymentDetails) {
+              order.paymentDetails.refund = {
+                refundId: refundInfo.refundId,
+                amount: refund.amount,
+                status: refund.status,
+                processedAt: refund.processedAt
+              };
+              order.paymentDetails.refundStatus = refund.status;
+            } else {
+              // Create paymentDetails if it doesn't exist
+              order.paymentDetails = {
+                refund: {
+                  refundId: refundInfo.refundId,
+                  amount: refund.amount,
+                  status: refund.status,
+                  processedAt: refund.processedAt
+                },
+                refundStatus: refund.status
+              };
+            }
+          }
+        }
+      }
+    });
+  } catch (error) {
+    // Log error but don't fail - just don't include refund info
+    console.error('Error batch populating refund info:', error);
+  }
+  
+  return orders;
+};
+
 // Get User Orders
 exports.getUserOrders = async (req, res, next) => {
   try {
@@ -72,6 +251,9 @@ exports.getUserOrders = async (req, res, next) => {
         return { ...order.toObject(), items: filteredItems };
       }).filter(order => order.items.length > 0);
     }
+
+    // Populate refund information for cancelled orders
+    await batchPopulateRefundInfo(orders);
 
     const total = await Order.countDocuments(query);
 
@@ -186,6 +368,9 @@ exports.getOrderById = async (req, res, next) => {
         });
       }
     }
+
+    // Populate refund information if order is cancelled
+    await populateRefundInfo(order);
 
     // Format order to ensure all monetary values are rounded
     const formattedOrder = formatOrderResponse(order);
@@ -1741,22 +1926,23 @@ exports.getRefundStatus = async (req, res, next) => {
   try {
     const userId = req.user._id || req.user.id;
     const userRole = req.user.role;
-    const orderId = req.params.orderId;
+    const orderIdentifier = req.params.orderId;
 
-    // Build query - admins can view any order, users can only view their own
+    // ✅ ORDER PERMISSION FIX: Don't filter by userId in query - find order first, then check authorization
     let order = null;
-    if (mongoose.Types.ObjectId.isValid(orderId)) {
-      const orderQuery = userRole === 'admin'
-        ? { _id: orderId }
-        : { _id: orderId, userId };
-      order = await Order.findOne(orderQuery);
+
+    if (mongoose.Types.ObjectId.isValid(orderIdentifier)) {
+      // Try finding by MongoDB _id
+      order = await Order.findOne({
+        _id: orderIdentifier
+      });
     }
 
+    // If not found, try finding by orderId string (e.g., "ORD-2025-295")
     if (!order) {
-      const orderIdQuery = userRole === 'admin'
-        ? { orderId: orderId }
-        : { orderId: orderId, userId };
-      order = await Order.findOne(orderIdQuery);
+      order = await Order.findOne({
+        orderId: orderIdentifier
+      });
     }
 
     if (!order) {
@@ -1767,10 +1953,42 @@ exports.getRefundStatus = async (req, res, next) => {
       });
     }
 
+    // ✅ ORDER PERMISSION FIX: Use robust ID comparison function
+    const orderUserId = order.userId?._id || order.userId;
+    
+    // For non-admin users, verify they own the order
+    if (userRole !== 'admin') {
+      if (!compareUserIds(orderUserId, userId)) {
+        return res.status(403).json({
+          success: false,
+          message: 'You do not have permission to access this order',
+          error: 'FORBIDDEN'
+        });
+      }
+    }
+
+    // Check if order is cancelled
+    if (order.status !== 'cancelled') {
+      return res.status(400).json({
+        success: false,
+        message: 'Order is not cancelled',
+        error: 'VALIDATION_ERROR'
+      });
+    }
+
+    // Find payment record
+    const payment = await Payment.findOne({ orderId: order._id });
+    
+    if (!payment || !payment.refundId) {
+      return res.json({
+        success: true,
+        message: 'No refund found for this order',
+        data: null
+      });
+    }
+
     // Find refund record
-    const refund = await Refund.findOne({ orderId: order._id })
-      .populate('paymentId')
-      .populate('orderId');
+    const refund = await Refund.findById(payment.refundId);
 
     if (!refund) {
       return res.json({
@@ -1780,22 +1998,46 @@ exports.getRefundStatus = async (req, res, next) => {
       });
     }
 
+    // Convert refund to plain object if needed
+    const refundObj = refund.toObject ? refund.toObject() : { ...refund };
+
     // Optionally fetch latest status from Razorpay
-    try {
-      const razorpayRefund = await getRazorpayInstance().refunds.fetch(refund.razorpayRefundId);
-      // Update refund status if changed
-      if (razorpayRefund.status !== refund.status) {
-        refund.status = razorpayRefund.status === 'processed' ? 'processed' : 'pending';
-        await refund.save();
+    let latestStatus = refundObj.status;
+    if (refundObj.razorpayRefundId) {
+      try {
+        const razorpayRefund = await getRazorpayInstance().refunds.fetch(refundObj.razorpayRefundId);
+        // Map Razorpay status to our status
+        latestStatus = razorpayRefund.status === 'processed' ? 'processed' : 
+                      razorpayRefund.status === 'failed' ? 'failed' : 'pending';
+        
+        // Update refund status if changed
+        if (latestStatus !== refundObj.status) {
+          refund.status = latestStatus;
+          await refund.save();
+          refundObj.status = latestStatus;
+        }
+      } catch (error) {
+        console.error('Error fetching refund status from Razorpay:', error);
+        // Don't fail if Razorpay fetch fails - use stored status
       }
-    } catch (error) {
-      console.error('Error fetching refund status from Razorpay:', error);
-      // Don't fail if Razorpay fetch fails
     }
 
+    // Format refund response according to documentation
     return res.json({
       success: true,
-      data: refund
+      data: {
+        refundId: refundObj.refundId || refundObj._id?.toString(),
+        razorpayRefundId: refundObj.razorpayRefundId,
+        paymentId: refundObj.paymentId?.toString() || refundObj.paymentId,
+        orderId: refundObj.orderId?.toString() || refundObj.orderId,
+        amount: refundObj.amount,
+        amountInPaise: refundObj.amountInPaise,
+        status: latestStatus,
+        reason: refundObj.reason,
+        processedAt: refundObj.processedAt,
+        updatedAt: refundObj.updatedAt || refundObj.processedAt,
+        razorpayRefundData: refundObj.razorpayRefundData
+      }
     });
   } catch (error) {
     next(error);
