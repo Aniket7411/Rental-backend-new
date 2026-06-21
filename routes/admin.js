@@ -76,22 +76,22 @@ const { validateAdminLogin, validateAC, validateService, validateLeadStatusUpdat
 router.post('/login', validateAdminLogin, login);
 
 // Admin AC routes
-router.get('/acs', auth, getAllACsAdmin);
-router.post('/acs', auth, validateAC, addAC);
-router.patch('/acs/:id', auth, updateAC);
-router.delete('/acs/:id', auth, deleteAC);
+router.get('/acs', adminAuth, getAllACsAdmin);
+router.post('/acs', adminAuth, validateAC, addAC);
+router.patch('/acs/:id', adminAuth, updateAC);
+router.delete('/acs/:id', adminAuth, deleteAC);
 
 // Admin rental inquiries routes
-router.get('/rental-inquiries', auth, getAllRentalInquiries);
-router.patch('/rental-inquiries/:inquiryId', auth, updateInquiryStatus);
+router.get('/rental-inquiries', adminAuth, getAllRentalInquiries);
+router.patch('/rental-inquiries/:inquiryId', adminAuth, updateInquiryStatus);
 
 // Admin vendor requests routes
-router.get('/vendor-requests', auth, getAllVendorRequests);
+router.get('/vendor-requests', adminAuth, getAllVendorRequests);
 
 // Admin service management routes
-router.post('/services', auth, validateService, createService);
-router.patch('/services/:id', auth, updateService);
-router.delete('/services/:id', auth, deleteService);
+router.post('/services', adminAuth, validateService, createService);
+router.patch('/services/:id', adminAuth, updateService);
+router.delete('/services/:id', adminAuth, deleteService);
 
 // Admin service bookings routes
 router.get('/service-bookings', adminAuth, getAllServiceBookings);
