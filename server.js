@@ -43,6 +43,7 @@ const allowedOrigins = [
   'https://rentalne.vercel.app',
   'https://rental-ac-frontend.vercel.app',
   'https://ashenterprises.in',
+  'https://www.ashenterprises.in',
   'http://localhost:3000',
   'http://localhost:3001',
   'http://localhost:5173',
