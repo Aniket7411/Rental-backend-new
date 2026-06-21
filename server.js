@@ -40,6 +40,7 @@ const PORT = process.env.PORT || 5000;
 // Middleware
 const allowedOrigins = [
   'https://rental-backend-new.onrender.com',
+  'https://rentalne.vercel.app',
   'https://rental-ac-frontend.vercel.app',
   'https://ashenterprises.in',
   'http://localhost:3000',
