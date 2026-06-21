@@ -7,7 +7,8 @@
       "PowerShell(git restore --staged package.json 2>&1)",
       "PowerShell(git add package.json)",
       "PowerShell(git add server.js controllers/productController.js)",
-      "PowerShell(git push origin main)"
+      "PowerShell(git push origin main)",
+      "PowerShell(git add server.js)"
     ],
     "additionalDirectories": [
       "C:\\Users\\sharm\\OneDrive\\Desktop\\rac\\Rental-backend-new"
