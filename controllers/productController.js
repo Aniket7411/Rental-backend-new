@@ -5,6 +5,7 @@ exports.getProducts = async (req, res, next) => {
   try {
     const {
       category,
+      categories,
       search,
       brand,
       capacity,
@@ -20,7 +21,15 @@ exports.getProducts = async (req, res, next) => {
     // Build query
     const query = {};
 
-    if (category) {
+    // Support both `category` (single) and `categories` (comma-separated list)
+    if (categories) {
+      const categoryList = categories.split(',').map(c => c.trim()).filter(Boolean);
+      if (categoryList.length === 1) {
+        query.category = categoryList[0];
+      } else if (categoryList.length > 1) {
+        query.category = { $in: categoryList };
+      }
+    } else if (category) {
       query.category = category;
     }
 
